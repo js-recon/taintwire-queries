@@ -1,0 +1,28 @@
+import type { PGRule, PGSelector } from "@js-recon/taintwire";
+import { urlRead, windowName } from "../lib/sources.pgq";
+
+/** URL-derived value sent with postMessage */
+export const sink: PGSelector = {
+    from: [urlRead, windowName],
+    mode: "deep",
+    maxHops: 8,
+    cypher: [
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE p.name IN ['postMessage'] AND a.idx IN [0, 1] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(:ObjectExpression)-[:SON {key: 'properties'}]->(op:ObjectProperty)-[:SON {key: 'value'}]->(n)
+WHERE p.name = 'postMessage' AND a.idx = 0 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, 'postMessage({...})' AS kind, n.file AS file, n.line AS line, n.col AS col` },
+    ],
+};
+
+export default {
+    id: "web_message_manipulation",
+    name: `Web message manipulation: URL or window.name value sent with postMessage or used as its target origin`,
+    severity: "medium",
+    message: `URL-derived value sent with postMessage`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into the data or targetOrigin argument of x.postMessage(). Attacker data relayed to another window reaches that window's message handler as if this page sent it; an attacker-chosen targetOrigin sends the message to the attacker.`,
+    author: "shriyanss",
+    tags: ["next", "vue", "react", "svelte", "angular"],
+    return: [sink],
+} satisfies PGRule;

@@ -1,0 +1,37 @@
+import type { PGRule, PGSelector } from "@js-recon/taintwire";
+import { urlRead, windowName } from "../lib/sources.pgq";
+
+/** URL-derived value reaches an HTML-parsing or trust sink */
+export const sink: PGSelector = {
+    from: [urlRead, windowName],
+    mode: "deep",
+    maxHops: 8,
+    cypher: [
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(f:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE f.name IN ['$', 'jQuery'] AND a.idx = 0 AND NOT EXISTS { MATCH (f)-[:REFERS_TO]->() } AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, f.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE p.name IN ['wrap', 'wrapAll', 'wrapInner', 'parseHTML', 'parseFromString', 'parseHTMLUnsafe'] AND a.idx = 0 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE p.name IN ['bypassSecurityTrustHtml', 'bypassSecurityTrustScript', 'bypassSecurityTrustStyle', 'bypassSecurityTrustUrl', 'bypassSecurityTrustResourceUrl'] AND a.idx = 0 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a0:SON {key: 'arguments'}]->(k:StringLiteral), (c)-[a1:SON {key: 'arguments'}]->(n)
+WHERE p.name IN ['execCommand'] AND a0.idx = 0 AND a1.idx = 2 AND k.value IN ['insertHTML'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a0:SON {key: 'arguments'}]->(k:TemplateLiteral)-[:SON {key: 'quasis'}]->(kq:TemplateElement), (c)-[a1:SON {key: 'arguments'}]->(n)
+WHERE p.name IN ['execCommand'] AND a0.idx = 0 AND a1.idx = 2 AND kq.value IN ['insertHTML'] AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+    ],
+};
+
+export default {
+    id: "dom_xss_framework_sinks",
+    name: `DOM XSS: URL or window.name value reaches a jQuery, Angular trust or HTML parser sink`,
+    severity: "high",
+    message: `URL-derived value reaches an HTML-parsing or trust sink`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into a sink that parses or trusts HTML: a jQuery $()/jQuery() selector call, .wrap()/.wrapAll()/.wrapInner(), $.parseHTML, DOMParser.parseFromString, Document.parseHTMLUnsafe, document.execCommand('insertHTML', ...), or an Angular DomSanitizer bypassSecurityTrust* call. Complements detect_taintwire_dom_xss_url, which covers the DOM property and method sinks.`,
+    author: "shriyanss",
+    tags: ["next", "vue", "react", "svelte", "angular"],
+    return: [sink],
+} satisfies PGRule;

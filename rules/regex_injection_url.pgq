@@ -1,0 +1,31 @@
+import type { PGRule, PGSelector } from "@js-recon/taintwire";
+import { urlRead, windowName } from "../lib/sources.pgq";
+
+/** URL-derived value compiled as a regular expression */
+export const sink: PGSelector = {
+    from: [urlRead, windowName],
+    mode: "deep",
+    maxHops: 8,
+    cypher: [
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(f:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE f.name IN ['RegExp'] AND a.idx = 0 AND NOT EXISTS { MATCH (f)-[:REFERS_TO]->() } AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, f.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:NewExpression)-[:SON {key: 'callee'}]->(f:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE f.name IN ['RegExp'] AND a.idx = 0 AND NOT EXISTS { MATCH (f)-[:REFERS_TO]->() } AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, f.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE p.name IN ['match', 'matchAll', 'search'] AND a.idx = 0 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+    ],
+};
+
+export default {
+    id: "regex_injection_url",
+    name: `Regular expression injection / ReDoS: URL or window.name value used as a pattern`,
+    severity: "low",
+    message: `URL-derived value compiled as a regular expression`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into a regular expression pattern: RegExp()/new RegExp(), or String.prototype.match/matchAll/search (which compile a string argument as a RegExp). An attacker-chosen pattern can hang the page (ReDoS) or change what a filter matches.`,
+    author: "shriyanss",
+    tags: ["next", "vue", "react", "svelte", "angular"],
+    return: [sink],
+} satisfies PGRule;

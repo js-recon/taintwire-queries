@@ -1,0 +1,34 @@
+import type { PGRule, PGSelector } from "@js-recon/taintwire";
+import { urlRead, windowName } from "../lib/sources.pgq";
+
+/** URL-derived value reaches a style sink */
+export const sink: PGSelector = {
+    from: [urlRead, windowName],
+    mode: "deep",
+    maxHops: 8,
+    cypher: [
+        { query: `MATCH (asg:AssignmentExpression)-[:SON {key: 'left'}]->(l:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (asg)-[:SON {key: 'right'}]->(n), (l)-[:SON {key: 'object'}]->(:MemberExpression)-[:SON {key: 'property'}]->(st:Identifier)
+WHERE st.name = 'style' AND p.name <> 'cssText' AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name + '=' AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (asg:AssignmentExpression)-[:SON {key: 'left'}]->(l:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (asg)-[:SON {key: 'right'}]->(n)
+WHERE p.name IN ['style'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name + '=' AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE p.name IN ['setProperty'] AND a.idx = 1 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE p.name IN ['insertRule', 'replaceSync'] AND a.idx = 0 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
+RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+    ],
+};
+
+export default {
+    id: "css_injection_url",
+    name: `CSS injection: URL or window.name value reaches a style sink`,
+    severity: "low",
+    message: `URL-derived value reaches a style sink`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into element.style.<property>, element.style, CSSStyleDeclaration.setProperty(), CSSStyleSheet.insertRule() or replaceSync(). Attacker CSS can exfiltrate attribute values with selectors and url(), or overlay the UI. style.cssText is reported by detect_taintwire_dom_xss_url.`,
+    author: "shriyanss",
+    tags: ["next", "vue", "react", "svelte", "angular"],
+    return: [sink],
+} satisfies PGRule;

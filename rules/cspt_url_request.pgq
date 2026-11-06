@@ -1,0 +1,33 @@
+import type { PGRule, PGSelector } from "@js-recon/taintwire";
+import { urlRead } from "../lib/sources.pgq";
+
+/** URL-derived value reaches a request URL */
+export const sink: PGSelector = {
+    from: urlRead,
+    mode: "deep",
+    maxHops: 8,
+    cypher: [
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(f:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE a.idx = 0 AND f.name IN ['fetch', '$fetch', 'axios'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
+RETURN n.id AS id, f.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n), (cm)-[:SON {key: 'object'}]->(o)
+WHERE ((a.idx = 0 AND p.name = 'fetch' AND o.name IN ['window', 'globalThis', 'self'])
+    OR (a.idx = 0 AND o.name = 'axios' AND p.name IN ['get', 'post', 'put', 'delete', 'patch', 'request'])
+    OR (a.idx = 1 AND p.name = 'open' AND (o.name IS NULL OR NOT o.name IN ['window', 'document']))) AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
+RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH (c:NewExpression)-[:SON {key: 'callee'}]->(f:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
+WHERE a.idx = 0 AND f.name IN ['WebSocket', 'EventSource'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
+RETURN n.id AS id, f.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+    ],
+};
+
+export default {
+    id: "cspt_url_request",
+    name: `Client-side path traversal: URL value reaches a request URL`,
+    severity: "medium",
+    message: `URL-derived value reaches a request URL`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) into the URL of a request: fetch, $fetch, axios and axios.get/post/..., window.fetch, XMLHttpRequest.open, new WebSocket or new EventSource. Review whether the value can change the request path.`,
+    author: "shriyanss",
+    tags: ["next", "vue", "react", "svelte", "angular"],
+    return: [sink],
+} satisfies PGRule;

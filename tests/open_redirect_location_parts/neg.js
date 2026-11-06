@@ -1,0 +1,1 @@
+location.hostname = "example.com";

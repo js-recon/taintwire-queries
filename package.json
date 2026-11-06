@@ -1,0 +1,16 @@
+{
+    "name": "taintwire-queries",
+    "private": true,
+    "description": "PookieGraph query (.pgq) pack for taintwire and js-recon",
+    "type": "module",
+    "scripts": {
+        "test": "node scripts/test.mjs"
+    },
+    "license": "MIT",
+    "devDependencies": {
+        "@js-recon/taintwire": "0.2.0-alpha.1"
+    },
+    "engines": {
+        "node": ">=22.18"
+    }
+}

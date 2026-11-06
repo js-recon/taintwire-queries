@@ -1,0 +1,1 @@
+$.get("/api/pages/home");
