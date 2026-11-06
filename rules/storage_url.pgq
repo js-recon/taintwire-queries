@@ -1,20 +1,13 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlReadNoHref } from "../lib/sources.pgq";
+import { storageSinks } from "../lib/sinks.pgq";
 
 /** URL-derived value written to a cookie or web storage */
 export const sink: PGSelector = {
     from: urlReadNoHref,
     mode: "deep",
     maxHops: 8,
-    cypher: [
-        { query: `MATCH (a:AssignmentExpression)-[:SON {key: 'left'}]->(l:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (l)-[:SON {key: 'object'}]->(o:Identifier), (a)-[:SON {key: 'right'}]->(n)
-WHERE p.name = 'cookie' AND o.name = 'document' AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
-RETURN n.id AS id, 'cookie' AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n), (cm)-[:SON {key: 'object'}]->(o)
-WHERE p.name = 'setItem' AND a.idx = 1 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
-  AND (o.name IN ['localStorage', 'sessionStorage'] OR EXISTS { MATCH (o)-[:SON {key: 'property'}]->(q:Identifier) WHERE q.name IN ['localStorage', 'sessionStorage'] })
-RETURN n.id AS id, 'setItem' AS kind, n.file AS file, n.line AS line, n.col AS col` },
-    ],
+    cypher: storageSinks,
 };
 
 export default {

@@ -1,14 +1,13 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlRead } from "../lib/sources.pgq";
+import { documentDomainSinks } from "../lib/sinks.pgq";
 
 /** URL-derived value written to document.domain */
 export const sink: PGSelector = {
     from: urlRead,
     mode: "deep",
     maxHops: 8,
-    cypher: { query: `MATCH (asg:AssignmentExpression)-[:SON {key: 'left'}]->(l:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (asg)-[:SON {key: 'right'}]->(n), (l)-[:SON {key: 'object'}]->(o:Identifier)
-WHERE p.name IN ['domain'] AND o.name = 'document' AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, p.name + '=' AS kind, n.file AS file, n.line AS line, n.col AS col` },
+    cypher: documentDomainSinks,
 };
 
 export default {

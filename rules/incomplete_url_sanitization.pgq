@@ -1,5 +1,6 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlRead, windowName } from "../lib/sources.pgq";
+import { pga } from "../lib/pga.pgq";
 
 /** URL-derived value checked against a hostname by substring */
 export const sink: PGSelector = {
@@ -7,20 +8,20 @@ export const sink: PGSelector = {
     mode: "deep",
     maxHops: 8,
     cypher: [
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(t:StringLiteral), (cm)-[:SON {key: 'object'}]->(n)
+        { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(t:StringLiteral), (cm)${pga.object}(n)
 WHERE a.idx = 0 AND (t.value IS NOT NULL AND (
      (p.name IN ['includes', 'indexOf'] AND t.value =~ '[.]?(https?://)?[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.][A-Za-z]{2,24}')
   OR (p.name = 'startsWith' AND t.value =~ 'https?://[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.][A-Za-z]{2,24}')
   OR (p.name = 'endsWith' AND t.value =~ '[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.][A-Za-z]{2,24}'))
   AND NOT t.value =~ '.*[.](js|mjs|cjs|json|html?|css|png|jpe?g|gif|svg|webp|avif|ico|txt|xml|map|woff2?|ttf|otf|eot|pdf|php|aspx?|jsp|md|mp[34]|webm|wasm|zip|gz)')
-RETURN n.id AS id, p.name + '(host)' AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(t:TemplateLiteral)-[:SON {key: 'quasis'}]->(tq:TemplateElement), (cm)-[:SON {key: 'object'}]->(n)
+${pga.ret("p.name + '(host)'")}` },
+        { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(t:TemplateLiteral)${pga.quasis}(tq:TemplateElement), (cm)${pga.object}(n)
 WHERE a.idx = 0 AND (tq.value IS NOT NULL AND t.props CONTAINS '"expressions":[]' AND (
      (p.name IN ['includes', 'indexOf'] AND tq.value =~ '[.]?(https?://)?[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.][A-Za-z]{2,24}')
   OR (p.name = 'startsWith' AND tq.value =~ 'https?://[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.][A-Za-z]{2,24}')
   OR (p.name = 'endsWith' AND tq.value =~ '[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.][A-Za-z]{2,24}'))
   AND NOT tq.value =~ '.*[.](js|mjs|cjs|json|html?|css|png|jpe?g|gif|svg|webp|avif|ico|txt|xml|map|woff2?|ttf|otf|eot|pdf|php|aspx?|jsp|md|mp[34]|webm|wasm|zip|gz)')
-RETURN n.id AS id, p.name + '(host)' AS kind, n.file AS file, n.line AS line, n.col AS col` },
+${pga.ret("p.name + '(host)'")}` },
     ],
 };
 

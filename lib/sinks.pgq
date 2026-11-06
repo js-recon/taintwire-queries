@@ -1,0 +1,253 @@
+import type { PGCypher } from "@js-recon/taintwire";
+import { pga } from "./pga.pgq";
+
+// Sink queries shared by two or more rules. Each one RETURNs id, kind, file, line, col (the sink value is n).
+
+/** Written as HTML: el.innerHTML/outerHTML/srcdoc/cssText = v, document.write/writeln(v), { __html: v } (React) or { innerHTML: v } props, and setter calls f(..., 'innerHTML', v). */
+export const htmlSinks: PGCypher[] = [
+    { query: `MATCH (a:AssignmentExpression)${pga.left}(:MemberExpression)${pga.property}(p:Identifier), (a)${pga.right}(n)
+WHERE p.name IN ['innerHTML', 'outerHTML', 'srcdoc', 'cssText'] AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (cm)${pga.object}(o)
+WHERE ((p.name IN ['write', 'writeln'] AND o.name = 'document' AND a.idx = 0)
+   OR (p.name = 'insertAdjacentHTML' AND a.idx = 1)
+   OR (p.name IN ['html', 'createContextualFragment', 'setHTMLUnsafe'] AND a.idx = 0)) AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("p.name")}` },
+    { query: `MATCH (o:ObjectProperty)${pga.key}(k:Identifier), (o)${pga.value}(n)
+WHERE k.name IN ['__html', 'innerHTML', 'outerHTML'] AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("k.name")}` },
+    { query: `MATCH (o:ObjectProperty)${pga.key}(k:StringLiteral), (o)${pga.value}(n)
+WHERE k.value IN ['__html', 'innerHTML', 'outerHTML'] AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("k.value")}` },
+    { query: `MATCH (c:CallExpression)${pga.arguments("a0")}(k:StringLiteral), (c)${pga.arguments("a1")}(n)
+WHERE a1.idx = a0.idx + 1 AND k.value IN ['innerHTML', 'outerHTML', 'srcdoc'] AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("'property-call'")}` },
+    { query: `MATCH (c:CallExpression)${pga.arguments("a0")}(k:TemplateLiteral)${pga.quasis}(kq:TemplateElement), (c)${pga.arguments("a1")}(n)
+WHERE a1.idx = a0.idx + 1 AND kq.value IN ['innerHTML', 'outerHTML', 'srcdoc'] AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("'property-call'")}` },
+];
+
+/** Parsed as HTML by a library: $(v)/jQuery(v), .wrap/.wrapAll/.wrapInner/.parseHTML/.parseFromString/.parseHTMLUnsafe(v), Angular's bypassSecurityTrust*(v), document.execCommand('insertHTML', _, v). */
+export const frameworkHtmlSinks: PGCypher[] = [
+    { query: `MATCH ${pga.call()}, (c)${pga.arguments("a")}(n)
+WHERE f.name IN ['$', 'jQuery'] AND a.idx = 0 AND ${pga.isGlobal("f")} AND NOT n.type IN ${pga.literals}
+${pga.ret("f.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['wrap', 'wrapAll', 'wrapInner', 'parseHTML', 'parseFromString', 'parseHTMLUnsafe'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['bypassSecurityTrustHtml', 'bypassSecurityTrustScript', 'bypassSecurityTrustStyle', 'bypassSecurityTrustUrl', 'bypassSecurityTrustResourceUrl'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:StringLiteral), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['execCommand'] AND a0.idx = 0 AND a1.idx = 2 AND k.value IN ['insertHTML'] AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:TemplateLiteral)${pga.quasis}(kq:TemplateElement), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['execCommand'] AND a0.idx = 0 AND a1.idx = 2 AND kq.value IN ['insertHTML'] AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+];
+
+/** Run as JavaScript: eval(v), Function(v)/new Function(v), and setTimeout/setInterval(v) with a string (a function argument is left out). */
+export const jsExecSinks: PGCypher[] = [
+    { query: `MATCH ${pga.call()}, (c)${pga.arguments("a")}(n)
+WHERE ((f.name IN ['eval', 'setTimeout', 'setInterval'] AND a.idx = 0) OR f.name = 'Function') AND NOT n.type IN ${pga.functions} AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("f.name")}` },
+    { query: `MATCH ${pga.newCall()}, (c)${pga.arguments("a")}(n)
+WHERE ((f.name IN ['eval', 'setTimeout', 'setInterval'] AND a.idx = 0) OR f.name = 'Function') AND NOT n.type IN ${pga.functions} AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("f.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['eval', 'setTimeout', 'setInterval'] AND a.idx = 0 AND NOT n.type IN ${pga.functions} AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("p.name")}` },
+];
+
+/** Stored: document.cookie = v, and localStorage/sessionStorage.setItem(k, v) (also through window. or any x.localStorage). */
+export const storageSinks: PGCypher[] = [
+    { query: `MATCH (a:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(p:Identifier), (l)${pga.object}(o:Identifier), (a)${pga.right}(n)
+WHERE p.name = 'cookie' AND o.name = 'document' AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("'cookie'")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (cm)${pga.object}(o)
+WHERE p.name = 'setItem' AND a.idx = 1 AND NOT n.type IN ${pga.literalsNoRegExp}
+  AND ${pga.named("o", ["localStorage", "sessionStorage"])}
+${pga.ret("'setItem'")}` },
+];
+
+/** A request URL: fetch/$fetch/axios(v), window/globalThis/self.fetch(v), axios.get/post/put/delete/patch/request(v), xhr.open(method, v), new WebSocket(v)/new EventSource(v). */
+export const requestUrlSinks: PGCypher[] = [
+    { query: `MATCH ${pga.call()}, (c)${pga.arguments("a")}(n)
+WHERE a.idx = 0 AND f.name IN ['fetch', '$fetch', 'axios'] AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("f.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (cm)${pga.object}(o)
+WHERE ((a.idx = 0 AND p.name = 'fetch' AND o.name IN ['window', 'globalThis', 'self'])
+    OR (a.idx = 0 AND o.name = 'axios' AND p.name IN ['get', 'post', 'put', 'delete', 'patch', 'request'])
+    OR (a.idx = 1 AND p.name = 'open' AND (o.name IS NULL OR NOT o.name IN ['window', 'document']))) AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.newCall()}, (c)${pga.arguments("a")}(n)
+WHERE a.idx = 0 AND f.name IN ['WebSocket', 'EventSource'] AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("f.name")}` },
+];
+
+/** More request URLs: $.ajax/get/post/getJSON/load(v), navigator.sendBeacon(v), new Request(v), and the url/baseURL of a request config object ({ url: v, method, ... }) passed to a call or a constructor. */
+export const requestExtendedSinks: PGCypher[] = [
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (cm)${pga.object}(o:Identifier)
+WHERE p.name IN ['ajax', 'get', 'post', 'getJSON', 'load'] AND a.idx = 0 AND o.name IN ['$', 'jQuery'] AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['sendBeacon'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.newCall()}, (c)${pga.arguments("a")}(n)
+WHERE f.name IN ['Request'] AND a.idx = 0 AND ${pga.isGlobal("f")} AND NOT n.type IN ${pga.literals}
+${pga.ret("f.name")}` },
+    { query: `MATCH (c:CallExpression)${pga.arguments("a")}(oe:ObjectExpression)${pga.properties}(op:ObjectProperty)${pga.key}(k:Identifier), (op)${pga.value}(n),
+      (oe)${pga.properties}(:ObjectProperty)${pga.key}(rk:Identifier)
+WHERE a.idx = 0 AND k.name IN ['url', 'baseURL'] AND rk.name IN ['method', 'success', 'headers', 'data', 'params', 'body', 'timeout', 'withCredentials', 'responseType', 'dataType', 'contentType', 'credentials'] AND NOT n.type IN ${pga.literals}
+${pga.ret("k.name + ':'")}` },
+    { query: `MATCH (c:NewExpression)${pga.arguments("a")}(oe:ObjectExpression)${pga.properties}(op:ObjectProperty)${pga.key}(k:Identifier), (op)${pga.value}(n),
+      (oe)${pga.properties}(:ObjectProperty)${pga.key}(rk:Identifier)
+WHERE a.idx = 0 AND k.name IN ['url', 'baseURL'] AND rk.name IN ['method', 'success', 'headers', 'data', 'params', 'body', 'timeout', 'withCredentials', 'responseType', 'dataType', 'contentType', 'credentials'] AND NOT n.type IN ${pga.literals}
+${pga.ret("k.name + ':'")}` },
+];
+
+/** document.domain = v. */
+export const documentDomainSinks: PGCypher[] = [
+    { query: `MATCH (asg:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(p:Identifier), (asg)${pga.right}(n), (l)${pga.object}(o:Identifier)
+WHERE p.name IN ['domain'] AND o.name = 'document' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name + '='")}` },
+];
+
+/** Loads or runs a script: new Worker/SharedWorker(v), importScripts/setImmediate/execScript(v), navigator.serviceWorker.register(v), $.getScript/globalEval(v), import(v), setAttribute('on*', v), and the src/text/textContent/innerText of an element made with createElement('script'). */
+export const scriptSinks: PGCypher[] = [
+    { query: `MATCH ${pga.newCall()}, (c)${pga.arguments("a")}(n)
+WHERE f.name IN ['Worker', 'SharedWorker'] AND a.idx = 0 AND ${pga.isGlobal("f")} AND NOT n.type IN ${pga.literals}
+${pga.ret("f.name")}` },
+    { query: `MATCH ${pga.call()}, (c)${pga.arguments("a")}(n)
+WHERE f.name IN ['importScripts', 'setImmediate', 'execScript'] AND a.idx = 0 AND ${pga.isGlobal("f")} AND NOT n.type IN ${pga.functions} AND NOT n.type IN ${pga.literals}
+${pga.ret("f.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (cm)${pga.object}(:MemberExpression)${pga.property}(sw:Identifier)
+WHERE p.name IN ['register'] AND a.idx = 0 AND sw.name = 'serviceWorker' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['getScript', 'globalEval'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH (c:CallExpression)${pga.callee}(:Import), (c)${pga.arguments("a")}(n)
+WHERE a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("'import()'")}` },
+    { query: `MATCH (c:ImportExpression)${pga.source}(n)
+WHERE NOT n.type IN ${pga.literals}
+${pga.ret("'import()'")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:StringLiteral), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['setAttribute'] AND a0.idx = 0 AND a1.idx = 1 AND k.value STARTS WITH 'on' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:TemplateLiteral)${pga.quasis}(kq:TemplateElement), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['setAttribute'] AND a0.idx = 0 AND a1.idx = 1 AND kq.value STARTS WITH 'on' AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(t:StringLiteral)
+WHERE p.name = 'createElement' AND a.idx = 0 AND t.value = 'script'
+MATCH (c)${pga.flowsTo(1, 6)}(o:Identifier)${pga.of.object}(m:MemberExpression)${pga.property}(q:Identifier), (m)${pga.of.left}(asg:AssignmentExpression)${pga.right}(n)
+WHERE q.name IN ['src', 'text', 'textContent', 'innerText'] AND NOT n.type IN ${pga.literals}
+RETURN DISTINCT n.id AS id, 'script.' + q.name AS kind, ${pga.loc()}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(t:TemplateLiteral)${pga.quasis}(tq:TemplateElement)
+WHERE p.name = 'createElement' AND a.idx = 0 AND tq.value = 'script' AND t.props CONTAINS '"expressions":[]'
+MATCH (c)${pga.flowsTo(1, 6)}(o:Identifier)${pga.of.object}(m:MemberExpression)${pga.property}(q:Identifier), (m)${pga.of.left}(asg:AssignmentExpression)${pga.right}(n)
+WHERE q.name IN ['src', 'text', 'textContent', 'innerText'] AND NOT n.type IN ${pga.literals}
+RETURN DISTINCT n.id AS id, 'script.' + q.name AS kind, ${pga.loc()}` },
+];
+
+/** Navigates the page: location = v, x.location/x.href = v, location.assign/replace(v) (also window./document.location), window.open(v), and setAttribute('href'/'src'/'action'/'formaction'/'srcdoc' or a computed name, v). */
+export const navigationSinks: PGCypher[] = [
+    { query: `MATCH (a:AssignmentExpression)${pga.left}(l:Identifier), (a)${pga.right}(n)
+WHERE l.name = 'location' AND ${pga.isGlobal("l")} AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("'location='")}` },
+    { query: `MATCH (a:AssignmentExpression)${pga.left}(:MemberExpression)${pga.property}(q:Identifier), (a)${pga.right}(n)
+WHERE q.name IN ['location', 'href'] AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("q.name + '='")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (cm)${pga.object}(o)
+WHERE a.idx = 0 AND ((p.name IN ['assign', 'replace'] AND ${pga.named("o", "location")}) OR (p.name = 'open' AND o.name = 'window')) AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:StringLiteral), (c)${pga.arguments("a1")}(n)
+WHERE p.name = 'setAttribute' AND a0.idx = 0 AND a1.idx = 1 AND k.value IN ['href', 'src', 'action', 'formaction', 'srcdoc'] AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("'setAttribute'")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:TemplateLiteral)${pga.quasis}(kq:TemplateElement), (c)${pga.arguments("a1")}(n)
+WHERE p.name = 'setAttribute' AND a0.idx = 0 AND a1.idx = 1 AND kq.value IN ['href', 'src', 'action', 'formaction', 'srcdoc'] AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("'setAttribute'")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k), (c)${pga.arguments("a1")}(n)
+WHERE p.name = 'setAttribute' AND a0.idx = 0 AND a1.idx = 1 AND NOT k.type IN ['StringLiteral', 'TemplateLiteral'] AND NOT n.type IN ${pga.literalsNoRegExp}
+${pga.ret("'setAttribute:dynamic'")}` },
+];
+
+/** A URL attribute of an element: el.src/action/formAction/data/poster/srcset/background/ping/codebase/cite = v, setAttribute/setAttributeNS of those names (and xlink:href), and jQuery .attr/.prop('href'/'src'/..., v). */
+export const linkSinks: PGCypher[] = [
+    { query: `MATCH (asg:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(p:Identifier), (asg)${pga.right}(n)
+WHERE p.name IN ['src', 'action', 'formAction', 'data', 'poster', 'srcset', 'background', 'ping', 'codebase', 'cite'] AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name + '='")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:StringLiteral), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['setAttribute'] AND a0.idx = 0 AND a1.idx = 1 AND k.value IN ['data', 'poster', 'srcset', 'xlink:href', 'background', 'ping', 'codebase', 'cite'] AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:TemplateLiteral)${pga.quasis}(kq:TemplateElement), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['setAttribute'] AND a0.idx = 0 AND a1.idx = 1 AND kq.value IN ['data', 'poster', 'srcset', 'xlink:href', 'background', 'ping', 'codebase', 'cite'] AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:StringLiteral), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['setAttributeNS'] AND a0.idx = 1 AND a1.idx = 2 AND k.value IN ['href', 'xlink:href', 'src'] AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:TemplateLiteral)${pga.quasis}(kq:TemplateElement), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['setAttributeNS'] AND a0.idx = 1 AND a1.idx = 2 AND kq.value IN ['href', 'xlink:href', 'src'] AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:StringLiteral), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['attr', 'prop'] AND a0.idx = 0 AND a1.idx = 1 AND k.value IN ['href', 'src', 'action', 'formaction', 'formAction', 'data', 'srcdoc'] AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k:TemplateLiteral)${pga.quasis}(kq:TemplateElement), (c)${pga.arguments("a1")}(n)
+WHERE p.name IN ['attr', 'prop'] AND a0.idx = 0 AND a1.idx = 1 AND kq.value IN ['href', 'src', 'action', 'formaction', 'formAction', 'data', 'srcdoc'] AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+];
+
+/** A request header name or value: xhr.setRequestHeader(k, v), { headers: { k: v } } (also an object that flows into headers:), new Headers({ k: v }), x.headers.k = v, x.headers.set/append(k, v). */
+export const requestHeaderSinks: PGCypher[] = [
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['setRequestHeader'] AND a.idx IN [0, 1] AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH (hp:ObjectProperty)${pga.key}(hk:Identifier), (hp)${pga.value}(:ObjectExpression)${pga.properties}(op:ObjectProperty)-[s:SON]->(n)
+WHERE hk.name = 'headers' AND (s.key = 'value' OR (s.key = 'key' AND op.props CONTAINS '"computed":true')) AND NOT n.type IN ${pga.literals}
+${pga.ret("'headers:'")}` },
+    { query: `MATCH (oe:ObjectExpression)${pga.flowsTo(1, 4)}(hv)${pga.of.value}(hp:ObjectProperty)${pga.key}(hk:Identifier), (oe)${pga.properties}(op:ObjectProperty)-[s:SON]->(n)
+WHERE hk.name = 'headers' AND (s.key = 'value' OR (s.key = 'key' AND op.props CONTAINS '"computed":true')) AND NOT n.type IN ${pga.literals}
+${pga.ret("'headers:'")}` },
+    { query: `MATCH ${pga.newCall()}, (c)${pga.arguments("a")}(:ObjectExpression)${pga.properties}(op:ObjectProperty)${pga.value}(n)
+WHERE f.name = 'Headers' AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("'new Headers'")}` },
+    { query: `MATCH (asg:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(p:Identifier), (asg)${pga.right}(n), (l)${pga.object}(:MemberExpression)${pga.property}(h:Identifier)
+WHERE h.name = 'headers' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name + '='")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (cm)${pga.object}(:MemberExpression)${pga.property}(h:Identifier)
+WHERE p.name IN ['set', 'append'] AND a.idx IN [0, 1] AND h.name = 'headers' AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+];
+
+/** Compiled as a template: .template/.compile/.precompile(v), Angular's $compile/$interpolate/$parse/$eval/$evalAsync/$apply/$watch(v), and { template: v } component options. */
+export const templateSinks: PGCypher[] = [
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['template', 'compile', 'precompile', '$compile', '$interpolate', '$parse', '$eval', '$evalAsync', '$apply', '$watch'] AND a.idx = 0 AND NOT n.type IN ${pga.functions} AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.call()}, (c)${pga.arguments("a")}(n)
+WHERE f.name IN ['$compile', '$interpolate', '$parse'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("f.name")}` },
+    { query: `MATCH (o:ObjectProperty)${pga.key}(k:Identifier), (o)${pga.value}(n)
+WHERE k.name = 'template' AND NOT n.type IN ${pga.functions} AND NOT n.type IN ${pga.literals}
+${pga.ret("'template:'")}` },
+];
+
+/** A path into an object: o[k1][k2] = v, deep merges (_.merge/mergeWith/defaultsDeep/setWith, deepmerge, deepExtend) of v, _.zipObjectDeep(v), and $.extend(true, _, v). */
+export const prototypePollutionSinks: PGCypher[] = [
+    { query: `MATCH (asg:AssignmentExpression)${pga.left}(m1:MemberExpression)${pga.object}(m2:MemberExpression)${pga.property}(n)
+WHERE m1.props CONTAINS '"computed":true' AND m2.props CONTAINS '"computed":true' AND NOT n.type IN ${pga.literals}
+${pga.ret("'obj[key][k]='")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['merge', 'mergeWith', 'defaultsDeep', 'setWith', 'deepmerge', 'deepMerge', 'deepExtend'] AND a.idx >= 1 AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['zipObjectDeep'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(d:BooleanLiteral), (c)${pga.arguments("a")}(n)
+WHERE p.name = 'extend' AND a0.idx = 0 AND d.value = true AND a.idx >= 2 AND NOT n.type IN ${pga.literals}
+${pga.ret("'extend(true)'")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(d:UnaryExpression)${pga.argument}(z:NumericLiteral), (c)${pga.arguments("a")}(n)
+WHERE p.name = 'extend' AND a0.idx = 0 AND z.value = 0 AND a.idx >= 2 AND NOT n.type IN ${pga.literals}
+${pga.ret("'extend(!0)'")}` },
+];

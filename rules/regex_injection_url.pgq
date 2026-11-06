@@ -1,5 +1,6 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlRead, windowName } from "../lib/sources.pgq";
+import { pga } from "../lib/pga.pgq";
 
 /** URL-derived value compiled as a regular expression */
 export const sink: PGSelector = {
@@ -7,15 +8,15 @@ export const sink: PGSelector = {
     mode: "deep",
     maxHops: 8,
     cypher: [
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(f:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
-WHERE f.name IN ['RegExp'] AND a.idx = 0 AND NOT EXISTS { MATCH (f)-[:REFERS_TO]->() } AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, f.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:NewExpression)-[:SON {key: 'callee'}]->(f:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
-WHERE f.name IN ['RegExp'] AND a.idx = 0 AND NOT EXISTS { MATCH (f)-[:REFERS_TO]->() } AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, f.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
-WHERE p.name IN ['match', 'matchAll', 'search'] AND a.idx = 0 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH ${pga.call()}, (c)${pga.arguments("a")}(n)
+WHERE f.name IN ['RegExp'] AND a.idx = 0 AND ${pga.isGlobal("f")} AND NOT n.type IN ${pga.literals}
+${pga.ret("f.name")}` },
+        { query: `MATCH ${pga.newCall()}, (c)${pga.arguments("a")}(n)
+WHERE f.name IN ['RegExp'] AND a.idx = 0 AND ${pga.isGlobal("f")} AND NOT n.type IN ${pga.literals}
+${pga.ret("f.name")}` },
+        { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['match', 'matchAll', 'search'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
     ],
 };
 

@@ -1,79 +1,79 @@
 import type { PGSelector } from "@js-recon/taintwire";
+import { pga } from "./pga.pgq";
+
 // Taint sources shared by the rules. Each query RETURNs id, kind, file, line, col.
 
-/** A URL the page was loaded with: location.hash/search/href (also through window./document.location) and document.URL/documentURI/referrer/baseURI. */
-export const urlRead: PGSelector = {
-    cypher: { query: `MATCH (n:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (n)-[:SON {key: 'object'}]->(o)
-WHERE (p.name IN ['hash', 'search', 'href'] AND (o.name = 'location' OR EXISTS { MATCH (o)-[:SON {key: 'property'}]->(q:Identifier) WHERE q.name = 'location' }))
+/** A read of the page URL: location.<props> (also through window./document.location) or document.URL/documentURI/referrer/baseURI. */
+const pageUrl = (locationProps: string[]): PGSelector => ({
+    cypher: { query: `MATCH (n:MemberExpression)${pga.property}(p:Identifier), (n)${pga.object}(o)
+WHERE (p.name IN ${pga.list(locationProps)} AND ${pga.named("o", "location")})
    OR (p.name IN ['URL', 'documentURI', 'referrer', 'baseURI'] AND o.name = 'document')
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-};
+${pga.ret("p.name")}` },
+});
+
+/** A URL the page was loaded with: location.hash/search/href (also through window./document.location) and document.URL/documentURI/referrer/baseURI. */
+export const urlRead = pageUrl(["hash", "search", "href"]);
 
 /** urlRead without location.href (navigating to it is a no-op, so redirect rules leave it out). */
-export const urlReadNoHref: PGSelector = {
-    cypher: { query: `MATCH (n:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (n)-[:SON {key: 'object'}]->(o)
-WHERE (p.name IN ['hash', 'search'] AND (o.name = 'location' OR EXISTS { MATCH (o)-[:SON {key: 'property'}]->(q:Identifier) WHERE q.name = 'location' }))
-   OR (p.name IN ['URL', 'documentURI', 'referrer', 'baseURI'] AND o.name = 'document')
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-};
+export const urlReadNoHref = pageUrl(["hash", "search"]);
 
 /** window.name, which survives cross-origin navigation. */
 export const windowName: PGSelector = {
-    cypher: { query: `MATCH (n:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (n)-[:SON {key: 'object'}]->(o:Identifier)
+    cypher: { query: `MATCH (n:MemberExpression)${pga.property}(p:Identifier), (n)${pga.object}(o:Identifier)
 WHERE o.name = 'window' AND p.name = 'name'
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+${pga.ret("p.name")}` },
 };
 
 /** A response body: res.json()/res.text() and xhr.responseText/responseXML reads. */
 export const responseBody: PGSelector = {
     cypher: [
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier)
-WHERE p.name IN ['json', 'text'] AND NOT EXISTS { MATCH (c)-[:SON {key: 'arguments'}]->() }
-RETURN c.id AS id, p.name AS kind, c.file AS file, c.line AS line, c.col AS col` },
-        { query: `MATCH (n:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier)
+        { query: `MATCH ${pga.methodCall()}
+WHERE p.name IN ['json', 'text'] AND NOT EXISTS { MATCH (c)${pga.arguments()}() }
+${pga.ret("p.name", "c")}` },
+        { query: `MATCH (n:MemberExpression)${pga.property}(p:Identifier)
 WHERE p.name IN ['responseText', 'responseXML'] AND NOT EXISTS { MATCH (asg)-[s:SON]->(n) WHERE s.key = 'left' AND asg.type = 'AssignmentExpression' }
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+${pga.ret("p.name")}` },
     ],
 };
 
 /** A read of a property whose name contains 'passw'. */
 export const passwordRead: PGSelector = {
-    cypher: { query: `MATCH (n:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier)
+    cypher: { query: `MATCH (n:MemberExpression)${pga.property}(p:Identifier)
 WHERE lower(p.name) CONTAINS 'passw' AND NOT EXISTS { MATCH (asg)-[s:SON]->(n) WHERE s.key = 'left' AND asg.type = 'AssignmentExpression' }
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+${pga.ret("p.name")}` },
 };
 
 /** A `window.x || ...`/`document.x || ...` global read that a DOM element with that id or name can shadow. */
 export const clobberable: PGSelector = {
-    cypher: { query: `MATCH (lg:LogicalExpression)-[:SON {key: 'left'}]->(n:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (n)-[:SON {key: 'object'}]->(o:Identifier)
-WHERE o.name IN ['window', 'document', 'self', 'globalThis'] AND NOT EXISTS { MATCH (o)-[:REFERS_TO]->() } AND n.props CONTAINS '"computed":false'
+    cypher: { query: `MATCH (lg:LogicalExpression)${pga.left}(n:MemberExpression)${pga.property}(p:Identifier), (n)${pga.object}(o:Identifier)
+WHERE o.name IN ['window', 'document', 'self', 'globalThis'] AND ${pga.isGlobal("o")} AND n.props CONTAINS '"computed":false'
   AND NOT p.name IN ['location', 'document', 'navigator', 'history', 'localStorage', 'sessionStorage', 'indexedDB', 'caches', 'cookieStore', 'name', 'top', 'parent', 'opener', 'self', 'window', 'frames', 'frameElement', 'origin', 'crypto', 'performance', 'screen', 'visualViewport', 'innerWidth', 'innerHeight', 'outerWidth', 'outerHeight', 'devicePixelRatio', 'scrollX', 'scrollY', 'pageXOffset', 'pageYOffset', 'screenX', 'screenY', 'matchMedia', 'getComputedStyle', 'getSelection', 'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'queueMicrotask', 'structuredClone', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'Promise', 'Symbol', 'Map', 'Set', 'WeakMap', 'WeakSet', 'WeakRef', 'Proxy', 'Reflect', 'Intl', 'JSON', 'Math', 'Date', 'RegExp', 'Error', 'Object', 'Array', 'String', 'Number', 'Boolean', 'BigInt', 'console', 'alert', 'confirm', 'prompt', 'open', 'close', 'postMessage', 'addEventListener', 'removeEventListener', 'dispatchEvent', 'atob', 'btoa', 'encodeURIComponent', 'decodeURIComponent', 'URL', 'URLSearchParams', 'Blob', 'File', 'FileReader', 'FormData', 'Headers', 'Request', 'Response', 'AbortController', 'TextEncoder', 'TextDecoder', 'Image', 'Audio', 'Option', 'Event', 'CustomEvent', 'MutationObserver', 'ResizeObserver', 'IntersectionObserver', 'PerformanceObserver', 'BroadcastChannel', 'MessageChannel', 'customElements', 'trustedTypes', 'speechSynthesis', 'isSecureContext', 'crossOriginIsolated', 'scheduler', 'navigation', 'chrome', 'body', 'head', 'documentElement', 'readyState', 'visibilityState', 'hidden', 'cookie', 'domain', 'referrer', 'title', 'documentURI', 'baseURI', 'currentScript', 'activeElement', 'fonts', 'forms', 'images', 'links', 'scripts', 'styleSheets', 'defaultView', 'createElement', 'createTextNode', 'getElementById', 'querySelector', 'querySelectorAll', 'getElementsByTagName', 'getElementsByClassName', 'createEvent', 'execCommand', 'hasFocus', 'fullscreenElement', 'exitFullscreen', 'onload', 'onerror', 'onmessage', 'onpopstate', 'onhashchange', 'onbeforeunload', 'onunload', 'event', 'length', 'status', 'closed', 'process', 'global', 'globalThis', 'module', 'exports', 'require', 'define', 'webpackChunk', '__webpack_require__', '__NEXT_DATA__', '__NUXT__', '__INITIAL_STATE__', '__APOLLO_STATE__', '__REDUX_DEVTOOLS_EXTENSION__', '__REDUX_DEVTOOLS_EXTENSION_COMPOSE__', '__REACT_DEVTOOLS_GLOBAL_HOOK__', '__VUE_DEVTOOLS_GLOBAL_HOOK__', 'dataLayer', 'gtag', 'ga', 'fbq', 'Sentry', 'jQuery', '$', '_', 'Vue', 'React', 'ng', 'angular', 'Zone', 'Prism', 'hljs', 'MSStream', 'msCrypto', 'opera', 'safari', 'ethereum', 'webkit', 'mozInnerScreenX'] AND NOT p.name STARTS WITH 'webpackChunk' AND NOT p.name STARTS WITH '__'
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
+${pga.ret("p.name")}` },
 };
 
 /** A Math.random() value. */
 export const mathRandom: PGSelector = {
     cypher: [
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (cm)-[:SON {key: 'object'}]->(o:Identifier)
+        { query: `MATCH ${pga.methodCall()}, (cm)${pga.object}(o:Identifier)
 WHERE p.name = 'random' AND o.name = 'Math'
-RETURN c.id AS id, 'Math.random' AS kind, c.file AS file, c.line AS line, c.col AS col` },
-        { query: `MATCH (w)-[e:SON*1..8 (r, _ | WHERE r.key IN ['object', 'callee'])]->(c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (cm)-[:SON {key: 'object'}]->(o:Identifier)
+${pga.ret("'Math.random'", "c")}` },
+        { query: `MATCH (w)-[e:SON*1..8 (r, _ | WHERE r.key IN ['object', 'callee'])]->${pga.methodCall()}, (cm)${pga.object}(o:Identifier)
 WHERE p.name = 'random' AND o.name = 'Math'
-RETURN DISTINCT w.id AS id, 'Math.random chain' AS kind, w.file AS file, w.line AS line, w.col AS col` },
+RETURN DISTINCT w.id AS id, 'Math.random chain' AS kind, ${pga.loc("w")}` },
     ],
 };
 
 /** A stored value: localStorage/sessionStorage.getItem(), document.cookie, history.state. */
 export const storedValue: PGSelector = {
     cypher: [
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (cm)-[:SON {key: 'object'}]->(o)
-WHERE p.name = 'getItem' AND (o.name IN ['localStorage', 'sessionStorage'] OR EXISTS { MATCH (o)-[:SON {key: 'property'}]->(q:Identifier) WHERE q.name IN ['localStorage', 'sessionStorage'] })
-RETURN c.id AS id, 'getItem' AS kind, c.file AS file, c.line AS line, c.col AS col` },
-        { query: `MATCH (n:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (n)-[:SON {key: 'object'}]->(o:Identifier)
+        { query: `MATCH ${pga.methodCall()}, (cm)${pga.object}(o)
+WHERE p.name = 'getItem' AND ${pga.named("o", ["localStorage", "sessionStorage"])}
+${pga.ret("'getItem'", "c")}` },
+        { query: `MATCH (n:MemberExpression)${pga.property}(p:Identifier), (n)${pga.object}(o:Identifier)
 WHERE o.name = 'document' AND p.name = 'cookie' AND NOT EXISTS { MATCH (asg)-[s:SON]->(n) WHERE s.key = 'left' AND asg.type = 'AssignmentExpression' }
-RETURN n.id AS id, 'cookie' AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (n:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (n)-[:SON {key: 'object'}]->(o)
-WHERE p.name = 'state' AND (o.name = 'history' OR EXISTS { MATCH (o)-[:SON {key: 'property'}]->(q:Identifier) WHERE q.name = 'history' })
-RETURN n.id AS id, 'history.state' AS kind, n.file AS file, n.line AS line, n.col AS col` },
+${pga.ret("'cookie'")}` },
+        { query: `MATCH (n:MemberExpression)${pga.property}(p:Identifier), (n)${pga.object}(o)
+WHERE p.name = 'state' AND ${pga.named("o", "history")}
+${pga.ret("'history.state'")}` },
     ],
 };

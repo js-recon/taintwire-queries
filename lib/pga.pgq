@@ -1,0 +1,72 @@
+// PookieGraph aliases (pga): short names for the Cypher fragments the queries repeat. Each one is a plain string,
+// or a function that returns one, so it goes into a query with ${...}:
+//
+//     MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+//     WHERE p.name = 'setItem' AND a.idx = 1 AND NOT n.type IN ${pga.literals}
+//     ${pga.ret("p.name")}
+//
+// Reference: https://taintwire.js-recon.io/next/api/pga
+
+const son = (key: string) => `-[:SON {key: '${key}'}]->`;
+const of = (key: string) => `<-[:SON {key: '${key}'}]-`;
+/** ['a', 'b'], a Cypher list of strings. */
+const list = (names: string[]) => `[${names.map((n) => `'${n}'`).join(", ")}]`;
+/** n.file AS file, n.line AS line, n.col AS col: the location columns a return/from selector needs. */
+const loc = (n = "n") => `${n}.file AS file, ${n}.line AS line, ${n}.col AS col`;
+
+export const pga = {
+    // Edges from a node to its child, named after the SON key: (call)${pga.callee}(fn)
+    callee: son("callee"),
+    property: son("property"),
+    object: son("object"),
+    left: son("left"),
+    right: son("right"),
+    key: son("key"),
+    value: son("value"),
+    quasis: son("quasis"),
+    properties: son("properties"),
+    source: son("source"),
+    argument: son("argument"),
+    init: son("init"),
+    /** -[v:SON {key: 'arguments'}]->. Name the edge to test the argument's position: `a.idx = 1`. */
+    arguments: (v = "") => `-[${v}:SON {key: 'arguments'}]->`,
+    /** The same edges read from the child up to its parent: (o:Identifier)${pga.of.object}(m:MemberExpression) */
+    of: { object: of("object"), left: of("left"), value: of("value"), id: of("id") },
+    /** An identifier to its declaration. */
+    refersTo: `-[:REFERS_TO]->`,
+    /** A declaration to an identifier that uses it. */
+    referencedBy: `<-[:REFERS_TO]-`,
+    /** A value flow path of min..max hops. */
+    flowsTo: (min: number, max: number) => `-[:FLOWS_TO* ACYCLIC ${min}..${max}]->`,
+
+    /** x.method(...): binds the call `c`, the callee `cm` and the method name `p`. An empty name leaves a node unbound. */
+    methodCall: (c = "c", cm = "cm", p = "p") =>
+        `(${c}:CallExpression)${son("callee")}(${cm}:MemberExpression)${son("property")}(${p}:Identifier)`,
+    /** fn(...): binds the call `c` and the function name `f`. */
+    call: (c = "c", f = "f") => `(${c}:CallExpression)${son("callee")}(${f}:Identifier)`,
+    /** new Fn(...): binds the expression `c` and the constructor name `f`. */
+    newCall: (c = "c", f = "f") => `(${c}:NewExpression)${son("callee")}(${f}:Identifier)`,
+
+    /** The literal node types: `NOT n.type IN ${pga.literals}` keeps only values that can carry taint. */
+    literals: list(["StringLiteral", "NumericLiteral", "NullLiteral", "BooleanLiteral", "RegExpLiteral"]),
+    /** pga.literals without RegExpLiteral: the list some rules were written with, kept so they match exactly what they did. */
+    literalsNoRegExp: list(["StringLiteral", "NumericLiteral", "NullLiteral", "BooleanLiteral"]),
+    /** The function node types. */
+    functions: list(["FunctionExpression", "ArrowFunctionExpression", "FunctionDeclaration"]),
+    list,
+
+    /** `v` has no declaration in the graph: a global such as `fetch`, not a local binding that shadows it. */
+    isGlobal: (v: string) => `NOT EXISTS { MATCH (${v})-[:REFERS_TO]->() }`,
+    /**
+     * `o` is the identifier `name` (or one of `names`), or a member expression ending in it: `location` matches
+     * `location`, `window.location` and `document.location`. `q` is the name of the property node inside.
+     */
+    named: (o: string, names: string | string[], q = "q") => {
+        const is = typeof names === "string" ? `= '${names}'` : `IN ${list(names)}`;
+        return `(${o}.name ${is} OR EXISTS { MATCH (${o})${son("property")}(${q}:Identifier) WHERE ${q}.name ${is} })`;
+    },
+
+    loc,
+    /** The RETURN clause of a return/from selector: the node `n` as id plus its location, with `kind` (a Cypher expression). */
+    ret: (kind: string, n = "n") => `RETURN ${n}.id AS id, ${kind} AS kind, ${loc(n)}`,
+};

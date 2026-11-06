@@ -1,47 +1,13 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlRead, windowName } from "../lib/sources.pgq";
+import { scriptSinks } from "../lib/sinks.pgq";
 
 /** URL-derived value reaches a script loading or execution sink */
 export const sink: PGSelector = {
     from: [urlRead, windowName],
     mode: "deep",
     maxHops: 8,
-    cypher: [
-        { query: `MATCH (c:NewExpression)-[:SON {key: 'callee'}]->(f:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
-WHERE f.name IN ['Worker', 'SharedWorker'] AND a.idx = 0 AND NOT EXISTS { MATCH (f)-[:REFERS_TO]->() } AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, f.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(f:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
-WHERE f.name IN ['importScripts', 'setImmediate', 'execScript'] AND a.idx = 0 AND NOT EXISTS { MATCH (f)-[:REFERS_TO]->() } AND NOT n.type IN ['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, f.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n), (cm)-[:SON {key: 'object'}]->(:MemberExpression)-[:SON {key: 'property'}]->(sw:Identifier)
-WHERE p.name IN ['register'] AND a.idx = 0 AND sw.name = 'serviceWorker' AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
-WHERE p.name IN ['getScript', 'globalEval'] AND a.idx = 0 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(:Import), (c)-[a:SON {key: 'arguments'}]->(n)
-WHERE a.idx = 0 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, 'import()' AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:ImportExpression)-[:SON {key: 'source'}]->(n)
-WHERE NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, 'import()' AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a0:SON {key: 'arguments'}]->(k:StringLiteral), (c)-[a1:SON {key: 'arguments'}]->(n)
-WHERE p.name IN ['setAttribute'] AND a0.idx = 0 AND a1.idx = 1 AND k.value STARTS WITH 'on' AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a0:SON {key: 'arguments'}]->(k:TemplateLiteral)-[:SON {key: 'quasis'}]->(kq:TemplateElement), (c)-[a1:SON {key: 'arguments'}]->(n)
-WHERE p.name IN ['setAttribute'] AND a0.idx = 0 AND a1.idx = 1 AND kq.value STARTS WITH 'on' AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(t:StringLiteral)
-WHERE p.name = 'createElement' AND a.idx = 0 AND t.value = 'script'
-MATCH (c)-[:FLOWS_TO* ACYCLIC 1..6]->(o:Identifier)<-[:SON {key: 'object'}]-(m:MemberExpression)-[:SON {key: 'property'}]->(q:Identifier), (m)<-[:SON {key: 'left'}]-(asg:AssignmentExpression)-[:SON {key: 'right'}]->(n)
-WHERE q.name IN ['src', 'text', 'textContent', 'innerText'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN DISTINCT n.id AS id, 'script.' + q.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(t:TemplateLiteral)-[:SON {key: 'quasis'}]->(tq:TemplateElement)
-WHERE p.name = 'createElement' AND a.idx = 0 AND tq.value = 'script' AND t.props CONTAINS '"expressions":[]'
-MATCH (c)-[:FLOWS_TO* ACYCLIC 1..6]->(o:Identifier)<-[:SON {key: 'object'}]-(m:MemberExpression)-[:SON {key: 'property'}]->(q:Identifier), (m)<-[:SON {key: 'left'}]-(asg:AssignmentExpression)-[:SON {key: 'right'}]->(n)
-WHERE q.name IN ['src', 'text', 'textContent', 'innerText'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN DISTINCT n.id AS id, 'script.' + q.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-    ],
+    cypher: scriptSinks,
 };
 
 export default {

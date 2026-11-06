@@ -1,33 +1,13 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlRead, windowName } from "../lib/sources.pgq";
+import { htmlSinks } from "../lib/sinks.pgq";
 
 /** URL-derived value reaches an HTML sink */
 export const sink: PGSelector = {
     from: [urlRead, windowName],
     mode: "deep",
     maxHops: 8,
-    cypher: [
-        { query: `MATCH (a:AssignmentExpression)-[:SON {key: 'left'}]->(:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (a)-[:SON {key: 'right'}]->(n)
-WHERE p.name IN ['innerHTML', 'outerHTML', 'srcdoc', 'cssText'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n), (cm)-[:SON {key: 'object'}]->(o)
-WHERE ((p.name IN ['write', 'writeln'] AND o.name = 'document' AND a.idx = 0)
-   OR (p.name = 'insertAdjacentHTML' AND a.idx = 1)
-   OR (p.name IN ['html', 'createContextualFragment', 'setHTMLUnsafe'] AND a.idx = 0)) AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (o:ObjectProperty)-[:SON {key: 'key'}]->(k:Identifier), (o)-[:SON {key: 'value'}]->(n)
-WHERE k.name IN ['__html', 'innerHTML', 'outerHTML'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
-RETURN n.id AS id, k.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (o:ObjectProperty)-[:SON {key: 'key'}]->(k:StringLiteral), (o)-[:SON {key: 'value'}]->(n)
-WHERE k.value IN ['__html', 'innerHTML', 'outerHTML'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
-RETURN n.id AS id, k.value AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[a0:SON {key: 'arguments'}]->(k:StringLiteral), (c)-[a1:SON {key: 'arguments'}]->(n)
-WHERE a1.idx = a0.idx + 1 AND k.value IN ['innerHTML', 'outerHTML', 'srcdoc'] AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
-RETURN n.id AS id, 'property-call' AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (c:CallExpression)-[a0:SON {key: 'arguments'}]->(k:TemplateLiteral)-[:SON {key: 'quasis'}]->(kq:TemplateElement), (c)-[a1:SON {key: 'arguments'}]->(n)
-WHERE a1.idx = a0.idx + 1 AND kq.value IN ['innerHTML', 'outerHTML', 'srcdoc'] AND k.props CONTAINS '"expressions":[]' AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral']
-RETURN n.id AS id, 'property-call' AS kind, n.file AS file, n.line AS line, n.col AS col` },
-    ],
+    cypher: htmlSinks,
 };
 
 export default {

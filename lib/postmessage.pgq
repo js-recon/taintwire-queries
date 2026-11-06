@@ -1,19 +1,20 @@
 import type { PGSelector } from "@js-recon/taintwire";
+import { pga } from "./pga.pgq";
 
 // Message listeners and the event.data they read, chained through `uses`: $handler, then $listener.
 
 /** The handler argument of addEventListener("message", h), or the value assigned to onmessage. */
 export const handler: PGSelector = {
     cypher: [
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(:MemberExpression)-[:SON {key: 'property'}]->(ae:Identifier),
-      (c)-[a0:SON {key: 'arguments'}]->(t:StringLiteral), (c)-[a1:SON {key: 'arguments'}]->(h)
+        { query: `MATCH ${pga.methodCall("c", "", "ae")},
+      (c)${pga.arguments("a0")}(t:StringLiteral), (c)${pga.arguments("a1")}(h)
 WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND t.value = 'message'
 RETURN h.id AS id` },
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(:MemberExpression)-[:SON {key: 'property'}]->(ae:Identifier),
-      (c)-[a0:SON {key: 'arguments'}]->(t:TemplateLiteral)-[:SON {key: 'quasis'}]->(tq:TemplateElement), (c)-[a1:SON {key: 'arguments'}]->(h)
+        { query: `MATCH ${pga.methodCall("c", "", "ae")},
+      (c)${pga.arguments("a0")}(t:TemplateLiteral)${pga.quasis}(tq:TemplateElement), (c)${pga.arguments("a1")}(h)
 WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND tq.value = 'message' AND t.props CONTAINS '"expressions":[]'
 RETURN h.id AS id` },
-        { query: `MATCH (a:AssignmentExpression)-[:SON {key: 'left'}]->(:MemberExpression)-[:SON {key: 'property'}]->(om:Identifier), (a)-[:SON {key: 'right'}]->(h)
+        { query: `MATCH (a:AssignmentExpression)${pga.left}(:MemberExpression)${pga.property}(om:Identifier), (a)${pga.right}(h)
 WHERE om.name = 'onmessage'
 RETURN h.id AS id` },
     ],
@@ -23,12 +24,12 @@ RETURN h.id AS id` },
 export const listener: PGSelector = {
     uses: { handler },
     cypher: [
-        { query: `MATCH (f) WHERE f.id IN $handler AND f.type IN ['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration'] RETURN f.id AS id` },
-        { query: `MATCH (h:Identifier)-[:REFERS_TO]->(d:Identifier)<-[:SON {key: 'id'}]-(x)
+        { query: `MATCH (f) WHERE f.id IN $handler AND f.type IN ${pga.functions} RETURN f.id AS id` },
+        { query: `MATCH (h:Identifier)${pga.refersTo}(d:Identifier)${pga.of.id}(x)
 WHERE h.id IN $handler
-OPTIONAL MATCH (x)-[:SON {key: 'init'}]->(i)
-WITH CASE WHEN x.type IN ['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration'] THEN x.id ELSE i.id END AS fid, CASE WHEN x.type IN ['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration'] THEN x.type ELSE i.type END AS ft
-WHERE ft IN ['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration']
+OPTIONAL MATCH (x)${pga.init}(i)
+WITH CASE WHEN x.type IN ${pga.functions} THEN x.id ELSE i.id END AS fid, CASE WHEN x.type IN ${pga.functions} THEN x.type ELSE i.type END AS ft
+WHERE ft IN ${pga.functions}
 RETURN fid AS id` },
     ],
 };
@@ -36,7 +37,7 @@ RETURN fid AS id` },
 /** event.data reads of a listener's first parameter. */
 export const messageData: PGSelector = {
     uses: { listener },
-    cypher: { query: `MATCH (f)-[:SON {key: 'params', idx: 0}]->(d:Identifier)<-[:REFERS_TO]-(e:Identifier)<-[:SON {key: 'object'}]-(n:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier)
+    cypher: { query: `MATCH (f)-[:SON {key: 'params', idx: 0}]->(d:Identifier)${pga.referencedBy}(e:Identifier)${pga.of.object}(n:MemberExpression)${pga.property}(p:Identifier)
 WHERE f.id IN $listener AND p.name = 'data'
-RETURN n.id AS id, 'data' AS kind, n.file AS file, n.line AS line, n.col AS col` },
+${pga.ret("'data'")}` },
 };

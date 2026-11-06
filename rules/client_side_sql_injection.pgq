@@ -1,5 +1,6 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlRead, windowName } from "../lib/sources.pgq";
+import { pga } from "../lib/pga.pgq";
 
 /** URL-derived value reaches a SQL statement */
 export const sink: PGSelector = {
@@ -7,12 +8,12 @@ export const sink: PGSelector = {
     mode: "deep",
     maxHops: 8,
     cypher: [
-        { query: `MATCH (c:CallExpression)-[:SON {key: 'callee'}]->(cm:MemberExpression)-[:SON {key: 'property'}]->(p:Identifier), (c)-[a:SON {key: 'arguments'}]->(n)
-WHERE p.name IN ['executeSql', 'prepare', 'selectValue', 'selectObjects'] AND a.idx = 0 AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, p.name AS kind, n.file AS file, n.line AS line, n.col AS col` },
-        { query: `MATCH (op:ObjectProperty)-[:SON {key: 'key'}]->(k:Identifier), (op)-[:SON {key: 'value'}]->(n)
-WHERE k.name = 'sql' AND NOT n.type IN ['StringLiteral', 'NumericLiteral', 'NullLiteral', 'BooleanLiteral', 'RegExpLiteral']
-RETURN n.id AS id, 'sql:' AS kind, n.file AS file, n.line AS line, n.col AS col` },
+        { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name IN ['executeSql', 'prepare', 'selectValue', 'selectObjects'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+        { query: `MATCH (op:ObjectProperty)${pga.key}(k:Identifier), (op)${pga.value}(n)
+WHERE k.name = 'sql' AND NOT n.type IN ${pga.literals}
+${pga.ret("'sql:'")}` },
     ],
 };
 
