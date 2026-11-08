@@ -1,10 +1,10 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
-import { urlRead } from "../lib/sources.pgq";
+import { urlRead, windowName } from "../lib/sources.pgq";
 import { requestUrlSinks } from "../lib/sinks.pgq";
 
 /** URL-derived value reaches a request URL */
 export const sink: PGSelector = {
-    from: urlRead,
+    from: [urlRead, windowName],
     mode: "deep",
     maxHops: 8,
     cypher: requestUrlSinks,
@@ -15,7 +15,7 @@ export default {
     name: `Client-side path traversal: URL value reaches a request URL`,
     severity: "medium",
     message: `URL-derived value reaches a request URL`,
-    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) into the URL of a request: fetch, $fetch, axios and axios.get/post/..., window.fetch, XMLHttpRequest.open, new WebSocket or new EventSource. Review whether the value can change the request path.`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into the URL of a request: fetch, $fetch, axios and axios.get/post/..., window.fetch, XMLHttpRequest.open, new WebSocket or new EventSource. Review whether the value can change the request path.`,
     author: "shriyanss",
     tags: ["next", "vue", "react", "svelte", "angular"],
     return: [sink],

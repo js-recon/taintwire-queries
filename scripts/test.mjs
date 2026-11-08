@@ -17,22 +17,25 @@ const only = process.argv[2];
 let failed = errors.length + cypherErrors.length;
 for (const rule of rules) {
     if (only && rule.id !== only) continue;
+    const dir = join(root, "tests", rule.id);
+    const tests = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".js")).sort() : [];
     for (const [kind, want] of [["pos", true], ["neg", false]]) {
-        const file = join(root, "tests", rule.id, `${kind}.js`);
-        if (!existsSync(file)) {
+        if (!tests.includes(`${kind}.js`)) {
             console.error(`missing: tests/${rule.id}/${kind}.js`);
             failed++;
-            continue;
         }
-        const graph = await taintwire.import(readFileSync(file, "utf-8"), { filename: `${kind}.js`, parser: "babel" });
-        try {
-            const res = await taintwire.runPgq(graph, [rule]);
-            const fired = res.findings.length > 0;
-            const ok = !res.errors.length && fired === want;
-            if (!ok) failed++;
-            console.log(`${ok ? "ok  " : "FAIL"} ${rule.id} ${kind} (${res.findings.length} finding(s))${res.errors.map((e) => ` ${e.message}`).join("")}`);
-        } finally {
-            await graph.close();
+        // pos.js plus any pos-<case>.js (likewise neg)
+        for (const name of tests.filter((f) => f === `${kind}.js` || f.startsWith(`${kind}-`))) {
+            const graph = await taintwire.import(readFileSync(join(dir, name), "utf-8"), { filename: name, parser: "babel" });
+            try {
+                const res = await taintwire.runPgq(graph, [rule]);
+                const fired = res.findings.length > 0;
+                const ok = !res.errors.length && fired === want;
+                if (!ok) failed++;
+                console.log(`${ok ? "ok  " : "FAIL"} ${rule.id} ${name} (${res.findings.length} finding(s))${res.errors.map((e) => ` ${e.message}`).join("")}`);
+            } finally {
+                await graph.close();
+            }
         }
     }
 }

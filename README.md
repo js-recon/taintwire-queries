@@ -16,7 +16,7 @@ js-recon taintwire analyze -g example.pg -q taintwire-queries/rules
 | `lib/sources.pgq` | Taint sources shared by the rules: URL reads, `window.name`, response bodies, stored values, `Math.random()`, ... |
 | `lib/postmessage.pgq` | Message listeners and their `event.data` reads, chained with `uses` |
 | `rules/<id>.pgq` | One rule per file. Each file exports its sink selector as `sink`, and the rule as its default export. |
-| `tests/<id>/pos.js`, `neg.js` | A snippet the rule must report, and one it must not |
+| `tests/<id>/pos.js`, `neg.js` | A snippet the rule must report, and one it must not. Extra cases go in `pos-<case>.js` and `neg-<case>.js`. |
 
 The 31 rules started as the taintwire rules of [js-recon-rules](https://github.com/js-recon/js-recon-rules), with the same queries.
 
