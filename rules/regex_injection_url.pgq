@@ -14,8 +14,12 @@ ${pga.ret("f.name")}` },
         { query: `MATCH ${pga.newCall()}, (c)${pga.arguments("a")}(n)
 WHERE f.name IN ['RegExp'] AND a.idx = 0 AND ${pga.isGlobal("f")} AND NOT n.type IN ${pga.literals}
 ${pga.ret("f.name")}` },
-        { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+        // String.prototype.match/matchAll/search take one argument; a router's match(raw, current) or this.search(q) is not one.
+        { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (cm)${pga.object}(o)
 WHERE p.name IN ['match', 'matchAll', 'search'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+  AND NOT EXISTS { MATCH (c)-[za:SON {key: 'arguments'}]->() WHERE za.idx >= 1 }
+  AND o.type <> 'ThisExpression' AND NOT lower(coalesce(o.name, '')) =~ '.*(router|matcher).*'
+  AND NOT EXISTS { MATCH (o)-[:SON {key: 'property'}]->(zq) WHERE lower(zq.name) =~ '.*(router|matcher).*' }
 ${pga.ret("p.name")}` },
     ],
 };
@@ -25,7 +29,7 @@ export default {
     name: `Regular expression injection / ReDoS: URL or window.name value used as a pattern`,
     severity: "low",
     message: `URL-derived value compiled as a regular expression`,
-    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into a regular expression pattern: RegExp()/new RegExp(), or String.prototype.match/matchAll/search (which compile a string argument as a RegExp). An attacker-chosen pattern can hang the page (ReDoS) or change what a filter matches.`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into a regular expression pattern: RegExp()/new RegExp(), or String.prototype.match/matchAll/search (which compile a string argument as a RegExp; same-named methods that take more than one argument or belong to this or a router/matcher object are left out). An attacker-chosen pattern can hang the page (ReDoS) or change what a filter matches.`,
     author: "shriyanss",
     tags: ["next", "vue", "react", "svelte", "angular"],
     return: [sink],
