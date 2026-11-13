@@ -23,7 +23,8 @@ WHERE p.name = 'setItem' AND a.idx = 1 AND a0.idx = 0 AND NOT n.type IN ${pga.li
 ${pga.ret("'setItem'")}` },
         // xhr.setRequestHeader("X-Session", v), x.headers.set("X-Session", v)
         { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (c)${pga.arguments("a0")}(k)
-WHERE p.name IN ['setRequestHeader', 'set', 'append'] AND a.idx = 1 AND a0.idx = 0 AND NOT n.type IN ${pga.literals} AND ${named("k")}
+WHERE a.idx = 1 AND a0.idx = 0 AND NOT n.type IN ${pga.literals} AND ${named("k")}
+  AND (p.name = 'setRequestHeader' OR (p.name IN ['set', 'append'] AND EXISTS { MATCH (cm)-[:SON {key: 'object'}]->(zh)-[:SON {key: 'property'}]->(zp) WHERE zp.name = 'headers' }))
 ${pga.ret("p.name")}` },
         // { headers: { "X-Session": v } }, new Headers({ ... }), x.headers.Authorization = v
         { query: `MATCH (op:ObjectProperty)${pga.key}(k), (op)${pga.value}(n)
