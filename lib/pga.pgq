@@ -66,6 +66,15 @@ export const pga = {
         return `(${o}.name ${is} OR EXISTS { MATCH (${o})${son("property")}(${q}:Identifier) WHERE ${q}.name ${is} })`;
     },
 
+    /**
+     * The value `n` (or arg 0 of a call `n`, as in `cleanPath(v)`) is a `+` chain or template literal whose first
+     * part is a string literal fully matching the regex `re`: `"/home?q=" + v`, `` `#${v}` ``.
+     */
+    leads: (n: string, re: string) => `(EXISTS { MATCH (${n})-[:SON*0..1 (zw, _ | WHERE zw.key = 'arguments' AND zw.idx = 0)]->(zv)-[:SON*1..12 (zr, zx | WHERE zr.key = 'left' AND zx.operator = '+')]->(zl)
+WHERE zv.operator = '+' AND zl.type = 'StringLiteral' AND zl.value =~ '${re}' }
+ OR EXISTS { MATCH (${n})-[:SON*0..1 (zw, _ | WHERE zw.key = 'arguments' AND zw.idx = 0)]->(zv)-[zq:SON {key: 'quasis'}]->(ze)
+WHERE zv.type = 'TemplateLiteral' AND zq.idx = 0 AND ze.value =~ '${re}' })`,
+
     loc,
     /** The RETURN clause of a return/from selector: the node `n` as id plus its location, with `kind` (a Cypher expression). */
     ret: (kind: string, n = "n") => `RETURN ${n}.id AS id, ${kind} AS kind, ${loc(n)}`,
