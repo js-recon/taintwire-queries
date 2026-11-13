@@ -3,33 +3,49 @@ import { pga } from "./pga.pgq";
 
 // Message listeners and the event.data they read, chained through `uses`: $handler, then $listener.
 
+/** The listener's receiver is a dedicated or shared Worker (`w = new Worker(...); w.onmessage = h`): its messages come from this origin's own script. */
+const workerReceiver = (o: string) => `EXISTS { MATCH (${o})-[:REFERS_TO]->(zd)<-[:SON {key: 'id'}]-(zx)-[:SON {key: 'init'}]->(zn)-[:SON {key: 'callee'}]->(zf)
+WHERE zn.type = 'NewExpression' AND zf.name IN ['Worker', 'SharedWorker'] }`;
+
+/**
+ * The function body checks where the message came from with a check that can't be bypassed by a look-alike origin:
+ * e.origin / e.source compared with ===, !==, == or !=, or e.origin passed to a call (allowed.has(e.origin),
+ * /^https:\/\/a\.example$/.test(e.origin), isTrusted(e.origin)). e.origin.indexOf/startsWith/endsWith/includes(...)
+ * is a weak check, so it doesn't count.
+ */
+const originChecked = (f: string) => `(EXISTS { MATCH (${f})-[:SON*1..30]->(zm)-[:SON {key: 'property'}]->(zp), (zb)-[zs:SON]->(zm)
+WHERE zm.type = 'MemberExpression' AND zp.name IN ['origin', 'source'] AND zb.type = 'BinaryExpression' AND zb.operator IN ['===', '!==', '==', '!='] AND zs.key IN ['left', 'right'] }
+ OR EXISTS { MATCH (${f})-[:SON*1..30]->(zm)-[:SON {key: 'property'}]->(zp), (zc)-[:SON {key: 'arguments'}]->(zm)
+WHERE zm.type = 'MemberExpression' AND zp.name = 'origin' AND zc.type IN ['CallExpression', 'NewExpression'] })`;
+
 /** The handler argument of addEventListener("message", h), or the value assigned to onmessage. */
 export const handler: PGSelector = {
     cypher: [
-        { query: `MATCH ${pga.methodCall("c", "", "ae")},
-      (c)${pga.arguments("a0")}(t:StringLiteral), (c)${pga.arguments("a1")}(h)
-WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND t.value = 'message'
+        { query: `MATCH ${pga.methodCall("c", "cm", "ae")},
+      (c)${pga.arguments("a0")}(t:StringLiteral), (c)${pga.arguments("a1")}(h), (cm)${pga.object}(o)
+WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND t.value = 'message' AND NOT ${workerReceiver("o")}
 RETURN h.id AS id` },
-        { query: `MATCH ${pga.methodCall("c", "", "ae")},
-      (c)${pga.arguments("a0")}(t:TemplateLiteral)${pga.quasis}(tq:TemplateElement), (c)${pga.arguments("a1")}(h)
-WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND tq.value = 'message' AND t.props CONTAINS '"expressions":[]'
+        { query: `MATCH ${pga.methodCall("c", "cm", "ae")},
+      (c)${pga.arguments("a0")}(t:TemplateLiteral)${pga.quasis}(tq:TemplateElement), (c)${pga.arguments("a1")}(h), (cm)${pga.object}(o)
+WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND tq.value = 'message' AND t.props CONTAINS '"expressions":[]' AND NOT ${workerReceiver("o")}
 RETURN h.id AS id` },
-        { query: `MATCH (a:AssignmentExpression)${pga.left}(:MemberExpression)${pga.property}(om:Identifier), (a)${pga.right}(h)
-WHERE om.name = 'onmessage'
+        { query: `MATCH (a:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(om:Identifier), (a)${pga.right}(h), (l)${pga.object}(o)
+WHERE om.name = 'onmessage' AND NOT ${workerReceiver("o")}
 RETURN h.id AS id` },
     ],
 };
 
-/** The listener function itself: the handler when it's a function literal, or the function a handler name refers to. */
+/** The listener function itself: the handler when it's a function literal, or the function a handler name refers to. Listeners that check e.origin/e.source (see originChecked) are left out. */
 export const listener: PGSelector = {
     uses: { handler },
     cypher: [
-        { query: `MATCH (f) WHERE f.id IN $handler AND f.type IN ${pga.functions} RETURN f.id AS id` },
+        { query: `MATCH (f) WHERE f.id IN $handler AND f.type IN ${pga.functions} AND NOT ${originChecked("f")} RETURN f.id AS id` },
         { query: `MATCH (h:Identifier)${pga.refersTo}(d:Identifier)${pga.of.id}(x)
 WHERE h.id IN $handler
 OPTIONAL MATCH (x)${pga.init}(i)
 WITH CASE WHEN x.type IN ${pga.functions} THEN x.id ELSE i.id END AS fid, CASE WHEN x.type IN ${pga.functions} THEN x.type ELSE i.type END AS ft
 WHERE ft IN ${pga.functions}
+MATCH (f) WHERE f.id = fid AND NOT ${originChecked("f")}
 RETURN fid AS id` },
     ],
 };

@@ -33,7 +33,7 @@ export default {
     name: `postMessage data reaches a script, template, framework HTML, request, storage or prototype-pollution sink`,
     severity: "high",
     message: `message event data reaches a sensitive sink`,
-    description: `Taint flow from the data of a message event (addEventListener('message', h) / onmessage = h) into a sink not covered by detect_taintwire_postmessage_flow: jQuery $()/parseHTML, DOMParser, Angular bypassSecurityTrust*, script loading (Worker, import(), <script> src/text, serviceWorker.register), template compilers, request URLs, cookie or web storage writes, document.domain, or a prototype-polluting merge or nested computed assignment.`,
+    description: `Taint flow from the data of a message event (addEventListener('message', h) / onmessage = h) into a sink not covered by detect_taintwire_postmessage_flow: jQuery $()/parseHTML, DOMParser, Angular bypassSecurityTrust*, script loading (Worker, import(), <script> src/text, serviceWorker.register), template compilers, request URLs, cookie or web storage writes, document.domain, or a prototype-polluting merge or nested computed assignment. Listeners that compare event.origin/event.source exactly and Worker message listeners are left out.`,
     author: "shriyanss",
     tags: ["next", "vue", "react", "svelte", "angular"],
     return: [sink],
