@@ -10,6 +10,7 @@ export const sink: PGSelector = {
     cypher: [
         { query: `MATCH (asg:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(p:Identifier), (asg)${pga.right}(n), (l)${pga.object}(:MemberExpression)${pga.property}(st:Identifier)
 WHERE st.name = 'style' AND p.name <> 'cssText' AND NOT n.type IN ${pga.literals}
+  AND NOT (n.operator = '+' AND EXISTS { MATCH (n)-[:SON {key: 'right'}]->(zu) WHERE zu.type = 'StringLiteral' AND zu.value IN ['px', 'em', 'rem', '%', 'vh', 'vw', 'vmin', 'vmax', 'deg', 's', 'ms', 'fr', 'ch', 'ex', 'pt'] })
 ${pga.ret("p.name + '='")}` },
         { query: `MATCH (asg:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(p:Identifier), (asg)${pga.right}(n)
 WHERE p.name IN ['style'] AND NOT n.type IN ${pga.literals}
@@ -28,7 +29,7 @@ export default {
     name: `CSS injection: URL or window.name value reaches a style sink`,
     severity: "low",
     message: `URL-derived value reaches a style sink`,
-    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into element.style.<property>, element.style, CSSStyleDeclaration.setProperty(), CSSStyleSheet.insertRule() or replaceSync(). Attacker CSS can exfiltrate attribute values with selectors and url(), or overlay the UI. style.cssText is reported by detect_taintwire_dom_xss_url.`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into element.style.<property> (a value ending in a + "px"-style unit is left out: one property setter can't break out of that property), element.style, CSSStyleDeclaration.setProperty(), CSSStyleSheet.insertRule() or replaceSync(). Attacker CSS can exfiltrate attribute values with selectors and url(), or overlay the UI. style.cssText is reported by detect_taintwire_dom_xss_url.`,
     author: "shriyanss",
     tags: ["next", "vue", "react", "svelte", "angular"],
     return: [sink],
