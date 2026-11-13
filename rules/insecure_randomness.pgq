@@ -1,6 +1,10 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
+import { pga } from "../lib/pga.pgq";
 import { mathRandom } from "../lib/sources.pgq";
-import { storageSinks, requestHeaderSinks } from "../lib/sinks.pgq";
+
+// Only a name that says the value is a secret: an id, a sample rate or a storage probe made with Math.random() is harmless.
+const secret = "(?i).*(token|sess|sid|nonce|csrf|xsrf|auth|secret|otp|state|key|pass|salt|verifier).*";
+const named = (k: string) => `(coalesce(${k}.name, ${k}.value) =~ '${secret}')`;
 
 /** Math.random()-derived value stored or sent as a token */
 export const sink: PGSelector = {
@@ -8,17 +12,36 @@ export const sink: PGSelector = {
     mode: "deep",
     maxHops: 8,
     cypher: [
-        ...storageSinks,
-        ...requestHeaderSinks,
+        // document.cookie = "token=" + v
+        { query: `MATCH (a:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(p:Identifier), (l)${pga.object}(o:Identifier), (a)${pga.right}(n)
+WHERE p.name = 'cookie' AND o.name = 'document' AND NOT n.type IN ${pga.literalsNoRegExp} AND ${pga.leads("n", secret)}
+${pga.ret("'cookie'")}` },
+        // localStorage.setItem("csrf", v)
+        { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (c)${pga.arguments("a0")}(k), (cm)${pga.object}(o)
+WHERE p.name = 'setItem' AND a.idx = 1 AND a0.idx = 0 AND NOT n.type IN ${pga.literalsNoRegExp} AND ${pga.named("o", ["localStorage", "sessionStorage"])}
+  AND (${named("k")} OR ${pga.leads("k", secret)})
+${pga.ret("'setItem'")}` },
+        // xhr.setRequestHeader("X-Session", v), x.headers.set("X-Session", v)
+        { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (c)${pga.arguments("a0")}(k)
+WHERE p.name IN ['setRequestHeader', 'set', 'append'] AND a.idx = 1 AND a0.idx = 0 AND NOT n.type IN ${pga.literals} AND ${named("k")}
+${pga.ret("p.name")}` },
+        // { headers: { "X-Session": v } }, new Headers({ ... }), x.headers.Authorization = v
+        { query: `MATCH (op:ObjectProperty)${pga.key}(k), (op)${pga.value}(n)
+WHERE NOT n.type IN ${pga.literals} AND ${named("k")}
+  AND EXISTS { MATCH (zh:ObjectProperty)-[:SON {key: 'key'}]->(zk), (zh)-[:SON {key: 'value'}]->(zo)-[:SON {key: 'properties'}]->(op) WHERE zk.name = 'headers' }
+${pga.ret("'headers:'")}` },
+        { query: `MATCH (asg:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(p:Identifier), (asg)${pga.right}(n), (l)${pga.object}(:MemberExpression)${pga.property}(h:Identifier)
+WHERE h.name = 'headers' AND NOT n.type IN ${pga.literals} AND ${named("p")}
+${pga.ret("p.name + '='")}` },
     ],
 };
 
 export default {
     id: "insecure_randomness",
-    name: `Insecure randomness: Math.random() value stored as a cookie, in web storage or sent as a request header`,
+    name: `Insecure randomness: Math.random() value stored or sent under a secret's name`,
     severity: "low",
     message: `Math.random()-derived value stored or sent as a token`,
-    description: `Taint flow from Math.random() into document.cookie, localStorage/sessionStorage.setItem() or a request header (setRequestHeader, headers: {...}, new Headers, x.headers.X =). Math.random() is predictable, so a session id, CSRF token or nonce generated with it can be guessed. Use crypto.getRandomValues() or crypto.randomUUID().`,
+    description: `Taint flow from Math.random() into a cookie, a localStorage/sessionStorage.setItem() key or a request header whose name says it holds a secret (token, session, sid, nonce, csrf/xsrf, auth, secret, otp, state, key, pass, salt, verifier). Math.random() is predictable, so a session id, CSRF token or nonce generated with it can be guessed. Use crypto.getRandomValues() or crypto.randomUUID(). Ids, sample rates and storage probes under other names are not reported.`,
     author: "shriyanss",
     tags: ["next", "vue", "react", "svelte", "angular"],
     return: [sink],
