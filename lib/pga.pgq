@@ -68,12 +68,15 @@ export const pga = {
 
     /**
      * The value `n` (or arg 0 of a call `n`, as in `cleanPath(v)`) is a `+` chain or template literal whose first
-     * part is a string literal fully matching the regex `re`: `"/home?q=" + v`, `` `#${v}` ``.
+     * part is a string literal fully matching the regex `re`: `"/home?q=" + v`, `` `#${v}` ``. The first operand of a
+     * `+` chain starts at the chain's own offset, so this is a join on offsets, not a walk down the tree.
+     * Every subquery is anchored on `n` and its joined nodes are label-free: Ladybug misplans an unanchored EXISTS
+     * inside an OR, and a label missing from the graph fails the whole query.
      */
-    leads: (n: string, re: string) => `(EXISTS { MATCH (${n})-[:SON*0..1 (zw, _ | WHERE zw.key = 'arguments' AND zw.idx = 0)]->(zv)-[:SON*1..12 (zr, zx | WHERE zr.key = 'left' AND zx.operator = '+')]->(zl)
-WHERE zv.operator = '+' AND zl.type = 'StringLiteral' AND zl.value =~ '${re}' }
- OR EXISTS { MATCH (${n})-[:SON*0..1 (zw, _ | WHERE zw.key = 'arguments' AND zw.idx = 0)]->(zv)-[zq:SON {key: 'quasis'}]->(ze)
-WHERE zv.type = 'TemplateLiteral' AND zq.idx = 0 AND ze.value =~ '${re}' })`,
+    leads: (n: string, re: string) => `(EXISTS { MATCH (${n})-[:SON {key: 'left'}]->(zx), (zl) WHERE ${n}.operator = '+' AND zl.type = 'StringLiteral' AND zl.file = ${n}.file AND zl.startOffset = ${n}.startOffset AND zl.value =~ '${re}' }
+ OR EXISTS { MATCH (${n})-[zw:SON {key: 'arguments'}]->(zv)-[:SON {key: 'left'}]->(zx), (zl) WHERE zw.idx = 0 AND zv.operator = '+' AND zl.type = 'StringLiteral' AND zl.file = zv.file AND zl.startOffset = zv.startOffset AND zl.value =~ '${re}' }
+ OR EXISTS { MATCH (${n})-[zq:SON {key: 'quasis'}]->(ze) WHERE zq.idx = 0 AND ze.value =~ '${re}' }
+ OR EXISTS { MATCH (${n})-[zw:SON {key: 'arguments'}]->(zv)-[zq:SON {key: 'quasis'}]->(ze) WHERE zw.idx = 0 AND zq.idx = 0 AND ze.value =~ '${re}' })`,
 
     loc,
     /** The RETURN clause of a return/from selector: the node `n` as id plus its location, with `kind` (a Cypher expression). */

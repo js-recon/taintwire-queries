@@ -10,8 +10,8 @@ import { pga } from "./pga.pgq";
  * `"/" + v` is not anchored: v = "/evil.example" makes it "//evil.example".
  */
 const sameOrigin = (n: string) => `(${pga.leads(n, "(/[^/\\x5c]|[?#]|https?://[^/]+/).*")}
- OR EXISTS { MATCH (${n})-[:SON*0..1 (zw, _ | WHERE zw.key = 'arguments' AND zw.idx = 0)]->(zv)-[:SON*1..12 (zr, zx | WHERE zr.key = 'left' AND zx.operator = '+')]->(zp)-[:SON {key: 'right'}]->(zl)
-WHERE zv.operator = '+' AND zp.operator = '+' AND zl.type = 'StringLiteral' AND zl.value STARTS WITH '/#' })`;
+ OR EXISTS { MATCH (${n})-[:SON {key: 'left'}]->(zx), (zp)-[:SON {key: 'right'}]->(zl) WHERE zl.type = 'StringLiteral' AND zl.value STARTS WITH '/#' AND zp.operator = '+' AND zp.file = ${n}.file AND zp.startOffset = ${n}.startOffset AND zp.id <> ${n}.id }
+ OR EXISTS { MATCH (${n})-[zw:SON {key: 'arguments'}]->(zv)-[:SON {key: 'left'}]->(zx), (zp)-[:SON {key: 'right'}]->(zl) WHERE zw.idx = 0 AND zl.type = 'StringLiteral' AND zl.value STARTS WITH '/#' AND zp.operator = '+' AND zp.file = zv.file AND zp.startOffset = zv.startOffset AND zp.id <> zv.id })`;
 
 /** setTimeout/setInterval given a function: a call that returns one (f.bind(x), wrap(f)) or a name bound to one. */
 const timerFunction = (f: string, n: string) => `(${f} IN ['setTimeout', 'setInterval'] AND (${n}.type = 'CallExpression'

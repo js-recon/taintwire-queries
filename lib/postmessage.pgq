@@ -13,10 +13,12 @@ WHERE zn.type = 'NewExpression' AND zf.name IN ['Worker', 'SharedWorker'] }`;
  * /^https:\/\/a\.example$/.test(e.origin), isTrusted(e.origin)). e.origin.indexOf/startsWith/endsWith/includes(...)
  * is a weak check, so it doesn't count.
  */
-const originChecked = (f: string) => `(EXISTS { MATCH (${f})-[:SON*1..30]->(zm)-[:SON {key: 'property'}]->(zp), (zb)-[zs:SON]->(zm)
-WHERE zm.type = 'MemberExpression' AND zp.name IN ['origin', 'source'] AND zb.type = 'BinaryExpression' AND zb.operator IN ['===', '!==', '==', '!='] AND zs.key IN ['left', 'right'] }
- OR EXISTS { MATCH (${f})-[:SON*1..30]->(zm)-[:SON {key: 'property'}]->(zp), (zc)-[:SON {key: 'arguments'}]->(zm)
-WHERE zm.type = 'MemberExpression' AND zp.name = 'origin' AND zc.type IN ['CallExpression', 'NewExpression'] })`;
+const originChecked = (f: string) => `(EXISTS { MATCH (${f})-[:SON {key: 'body'}]->(zy), (zm)-[:SON {key: 'property'}]->(zp), (zb)-[zs:SON]->(zm)
+WHERE zm.type = 'MemberExpression' AND zp.name IN ['origin', 'source'] AND zb.type = 'BinaryExpression' AND zb.operator IN ['===', '!==', '==', '!='] AND zs.key IN ['left', 'right']
+  AND zm.file = ${f}.file AND zm.startOffset > ${f}.startOffset AND zm.endOffset <= ${f}.endOffset }
+ OR EXISTS { MATCH (${f})-[:SON {key: 'body'}]->(zy), (zm)-[:SON {key: 'property'}]->(zp), (zc)-[:SON {key: 'arguments'}]->(zm)
+WHERE zm.type = 'MemberExpression' AND zp.name = 'origin' AND zc.type IN ['CallExpression', 'NewExpression']
+  AND zm.file = ${f}.file AND zm.startOffset > ${f}.startOffset AND zm.endOffset <= ${f}.endOffset })`;
 
 /** The handler argument of addEventListener("message", h), or the value assigned to onmessage. */
 export const handler: PGSelector = {
