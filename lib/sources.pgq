@@ -11,8 +11,15 @@ WHERE (p.name IN ${pga.list(locationProps)} AND ${pga.named("o", "location")})
 ${pga.ret("p.name")}` },
 });
 
-/** A URL the page was loaded with: location.hash/search/href (also through window./document.location) and document.URL/documentURI/referrer/baseURI. */
-export const urlRead = pageUrl(["hash", "search", "href"]);
+/** The whole location object handed to new URL()/new URLSearchParams(), as in `new URL(location).searchParams`: it stringifies to location.href. */
+const locationObject = {
+    query: `MATCH (c:NewExpression)${pga.callee}(k:Identifier), (c)${pga.arguments("a")}(n)
+WHERE k.name IN ['URL', 'URLSearchParams'] AND a.idx = 0 AND ${pga.named("n", "location")}
+${pga.ret("'location'")}`,
+};
+
+/** A URL the page was loaded with: location.hash/search/href (also through window./document.location), document.URL/documentURI/referrer/baseURI, and new URL(location). */
+export const urlRead: PGSelector = { cypher: [pageUrl(["hash", "search", "href"]).cypher, locationObject] };
 
 /** urlRead without location.href (navigating to it is a no-op, so redirect rules leave it out). */
 export const urlReadNoHref = pageUrl(["hash", "search"]);
