@@ -15,7 +15,7 @@ export default {
     name: `Prototype pollution: URL or window.name value reaches a nested computed assignment or deep merge`,
     severity: "medium",
     message: `URL-derived value reaches a prototype-polluting operation`,
-    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into the key of a nested computed assignment (obj[key][k] = v, where key = '__proto__' writes Object.prototype) or into the source of a deep merge: lodash merge/mergeWith/defaultsDeep/setWith/zipObjectDeep, deepmerge/deepExtend, or jQuery $.extend(true, ...). Polluted prototypes become gadgets for XSS or logic bypasses.`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into the key of a nested computed assignment (obj[key][k] = v, or a cursor walk cur = cur[key] = v as in jQuery deparam, where key = '__proto__' writes Object.prototype) or into the source of a deep merge: lodash merge/mergeWith/defaultsDeep/setWith/zipObjectDeep, deepmerge/deepExtend, or jQuery $.extend(true, ...). Polluted prototypes become gadgets for XSS or logic bypasses.`,
     author: "shriyanss",
     tags: ["next", "vue", "react", "svelte", "angular"],
     return: [sink],

@@ -265,6 +265,14 @@ export const prototypePollutionSinks: PGCypher[] = [
     { query: `MATCH (asg:AssignmentExpression)${pga.left}(m1:MemberExpression)${pga.object}(m2:MemberExpression)${pga.property}(n)
 WHERE m1.props CONTAINS '"computed":true' AND m2.props CONTAINS '"computed":true' AND NOT n.type IN ${pga.literals}
 ${pga.ret("'obj[key][k]='")}` },
+    // cursor walk (jQuery deparam / BBQ): cur = cur[key] = ...
+    { query: `MATCH (w:AssignmentExpression)${pga.left}(l:Identifier), (w)${pga.right}(asg:AssignmentExpression)${pga.left}(m1:MemberExpression)${pga.object}(o:Identifier), (m1)${pga.property}(n)
+WHERE m1.props CONTAINS '"computed":true' AND o.name = l.name AND NOT n.type IN ${pga.literals}
+${pga.ret("'cur=cur[key]='")}` },
+    // cursor walk (lodash-set style): cur = cur[k] somewhere in the file, then cur[key] = v
+    { query: `MATCH (asg:AssignmentExpression)${pga.left}(m1:MemberExpression)${pga.object}(o:Identifier), (m1)${pga.property}(n), (w:AssignmentExpression)${pga.left}(l:Identifier), (w)${pga.right}(r:MemberExpression)${pga.object}(ro:Identifier)
+WHERE m1.props CONTAINS '"computed":true' AND r.props CONTAINS '"computed":true' AND l.name = o.name AND ro.name = o.name AND w.file = asg.file AND NOT n.type IN ${pga.literals}
+${pga.ret("'cur=cur[k];cur[key]='")}` },
     { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
 WHERE p.name IN ['merge', 'mergeWith', 'defaultsDeep', 'setWith', 'deepmerge', 'deepMerge', 'deepExtend'] AND a.idx >= 1 AND NOT n.type IN ${pga.literals}
 ${pga.ret("p.name")}` },
