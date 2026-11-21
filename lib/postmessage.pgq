@@ -3,9 +3,9 @@ import { pga } from "./pga.pgq";
 
 // Message listeners and the event.data they read, chained through `uses`: $handler, then $listener.
 
-/** The listener's receiver is a dedicated or shared Worker (`w = new Worker(...); w.onmessage = h`): its messages come from this origin's own script. */
-const workerReceiver = (o: string) => `EXISTS { MATCH (${o})-[:REFERS_TO]->(zd)<-[:SON {key: 'id'}]-(zx)-[:SON {key: 'init'}]->(zn)-[:SON {key: 'callee'}]->(zf)
-WHERE zn.type = 'NewExpression' AND zf.name IN ['Worker', 'SharedWorker'] }`;
+/** The listener's receiver is a Worker, WebSocket, EventSource or BroadcastChannel (`ws = new WebSocket(...); ws.onmessage = h`): its messages come from this origin's own script or server, not another window. */
+const nonWindowReceiver = (o: string) => `EXISTS { MATCH (${o})-[:REFERS_TO]->(zd)<-[:SON {key: 'id'}]-(zx)-[:SON {key: 'init'}]->(zn)-[:SON {key: 'callee'}]->(zf)
+WHERE zn.type = 'NewExpression' AND zf.name IN ['Worker', 'SharedWorker', 'WebSocket', 'EventSource', 'BroadcastChannel'] }`;
 
 /**
  * The function body checks where the message came from with a check that can't be bypassed by a look-alike origin:
@@ -25,14 +25,14 @@ export const handler: PGSelector = {
     cypher: [
         { query: `MATCH ${pga.methodCall("c", "cm", "ae")},
       (c)${pga.arguments("a0")}(t:StringLiteral), (c)${pga.arguments("a1")}(h), (cm)${pga.object}(o)
-WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND t.value = 'message' AND NOT ${workerReceiver("o")}
+WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND t.value = 'message' AND NOT ${nonWindowReceiver("o")}
 RETURN h.id AS id` },
         { query: `MATCH ${pga.methodCall("c", "cm", "ae")},
       (c)${pga.arguments("a0")}(t:TemplateLiteral)${pga.quasis}(tq:TemplateElement), (c)${pga.arguments("a1")}(h), (cm)${pga.object}(o)
-WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND tq.value = 'message' AND t.props CONTAINS '"expressions":[]' AND NOT ${workerReceiver("o")}
+WHERE ae.name = 'addEventListener' AND a0.idx = 0 AND a1.idx = 1 AND tq.value = 'message' AND t.props CONTAINS '"expressions":[]' AND NOT ${nonWindowReceiver("o")}
 RETURN h.id AS id` },
         { query: `MATCH (a:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(om:Identifier), (a)${pga.right}(h), (l)${pga.object}(o)
-WHERE om.name = 'onmessage' AND NOT ${workerReceiver("o")}
+WHERE om.name = 'onmessage' AND NOT ${nonWindowReceiver("o")}
 RETURN h.id AS id` },
     ],
 };
