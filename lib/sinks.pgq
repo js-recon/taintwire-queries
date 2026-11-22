@@ -173,7 +173,7 @@ WHERE q.name IN ['src', 'text', 'textContent', 'innerText'] AND NOT n.type IN ${
 RETURN DISTINCT n.id AS id, 'script.' + q.name AS kind, ${pga.loc()}` },
 ];
 
-/** Navigates the page: location = v, x.location/x.href = v, location.assign/replace(v) (also window./document.location), window.open(v), and setAttribute('href'/'src'/'action'/'formaction'/'srcdoc' or a computed name, v). A value anchored to the page's origin ("/path?" + v, "#" + v) is left out. */
+/** Navigates the page: location = v, x.location/x.href = v, location.assign/replace(v) (also window./document.location), window.open(v), setAttribute('href'/'src'/'action'/'formaction'/'srcdoc' or a computed name, v), and the src of an iframe/frame made with createElement (also kept in an object: o = {el: frame}; o.el.src = v). A value anchored to the page's origin ("/path?" + v, "#" + v) is left out. */
 export const navigationSinks: PGCypher[] = [
     { query: `MATCH (a:AssignmentExpression)${pga.left}(l:Identifier), (a)${pga.right}(n)
 WHERE l.name = 'location' AND ${pga.isGlobal("l")} AND NOT n.type IN ${pga.literalsNoRegExp} AND NOT ${sameOrigin("n")}
@@ -193,6 +193,20 @@ ${pga.ret("'setAttribute'")}` },
     { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a0")}(k), (c)${pga.arguments("a1")}(n)
 WHERE p.name = 'setAttribute' AND a0.idx = 0 AND a1.idx = 1 AND NOT k.type IN ['StringLiteral', 'TemplateLiteral'] AND NOT n.type IN ${pga.literalsNoRegExp} AND NOT ${sameOrigin("n")}
 ${pga.ret("'setAttribute:dynamic'")}` },
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(t:StringLiteral)
+WHERE p.name = 'createElement' AND a.idx = 0 AND t.value IN ['iframe', 'frame']
+MATCH (c)${pga.flowsTo(1, 6)}(o:Identifier)${pga.of.object}(m:MemberExpression)${pga.property}(q:Identifier), (m)${pga.of.left}(asg:AssignmentExpression)${pga.right}(n)
+WHERE q.name = 'src' AND NOT n.type IN ${pga.literalsNoRegExp} AND NOT ${sameOrigin("n")}
+RETURN DISTINCT n.id AS id, t.value + '.src' AS kind, ${pga.loc()}` },
+    // The frame kept in an object: o = {element: frame} ... o.element.src = v. FLOWS_TO doesn't follow an object
+    // literal's property to a later read of it, so the property is joined by name.
+    // shortcut: one property level of a var-declared object, upgrade when taintwire models object properties.
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(t:StringLiteral)
+WHERE p.name = 'createElement' AND a.idx = 0 AND t.value IN ['iframe', 'frame']
+MATCH (c)${pga.flowsTo(1, 6)}(v:Identifier)${pga.of.value}(pr:ObjectProperty)${pga.key}(pk:Identifier), (pr)<-[:SON {key: 'properties'}]-(:ObjectExpression)<-[:SON {key: 'init'}]-(:VariableDeclarator)-[:SON {key: 'id'}]->(did:Identifier)
+MATCH (did)${pga.referencedBy}(oi:Identifier)${pga.of.object}(mm:MemberExpression)${pga.property}(mp:Identifier), (mm)${pga.of.object}(m:MemberExpression)${pga.property}(q:Identifier), (m)${pga.of.left}(asg:AssignmentExpression)${pga.right}(n)
+WHERE mp.name = pk.name AND q.name = 'src' AND NOT n.type IN ${pga.literalsNoRegExp} AND NOT ${sameOrigin("n")}
+RETURN DISTINCT n.id AS id, t.value + '.src' AS kind, ${pga.loc()}` },
 ];
 
 /** A URL attribute of an element: el.src/action/formAction/data/poster/srcset/background/ping/codebase/cite = v, setAttribute/setAttributeNS of those names (and xlink:href), and jQuery .attr/.prop('href'/'src'/..., v). */

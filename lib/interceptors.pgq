@@ -1,0 +1,191 @@
+// Interceptors: what stands between a finding's source and its sink. A rule lists them in `interceptors`, and
+// taintwire runs them once per finding with $sink, $source, $flow (the source and every node it reaches) and $found
+// (the ids the earlier queries here returned). Order matters: the guard queries come first, so the check queries
+// can look inside the guard tests they found.
+//
+//   guards: a condition the tainted value must pass for the sink to run. The row is the test expression,
+//           kind if | ternary | and-or | early-exit, text "must be true" / "must be false".
+//   checks: a recognised test on the tainted value inside a guard (kind check), text such as `contains "http:"`.
+//           A check describes its own expression; a `!` around it, or the guard's polarity, still applies.
+//
+// Every guard test references the taint (a $flow node inside it), and the walk from the guard to the sink stays in
+// one function, so a check in an outer function doesn't count for a callback that runs later.
+import type { PGCypher } from "@js-recon/taintwire";
+import { pga } from "./pga.pgq";
+
+// Deepest a tainted node may sit under a test.
+const TEST_DEPTH = 30;
+// The guard parts are found by offsets, not by walking SON up from the sink: n contains the sink k. On a 196 MB
+// graph the upward SON*0..30 walk took ~170s a query, this takes ~0.2s. Joined nodes are label-free: a label
+// missing from the graph fails the whole query.
+const holds = (n: string) => `${n}.file = k.file AND ${n}.startOffset <= k.startOffset AND ${n}.endOffset >= k.endOffset`;
+/** No function starts between g and the sink k: the guard and the sink run in the same call. */
+const sameFunction = (g: string) =>
+    `NOT EXISTS { MATCH (zf) WHERE zf.type IN ${pga.functions} AND zf.startOffset > ${g}.startOffset AND ${holds("zf")} }`;
+const tainted = (t: string) => `EXISTS { MATCH (${t})-[:SON*0..${TEST_DEPTH}]->(zt) WHERE zt.id IN $flow }`;
+// In the flow, or a member read of a value in it (d.type for d = JSON.parse(...)): $flow is the lenient reach,
+// which stops at the object.
+const inFlow = (o: string) => `(${o}.id IN $flow OR (${o}.type = 'MemberExpression' AND EXISTS { MATCH (${o})-[:SON {key: 'object'}]->(zf) WHERE zf.id IN $flow }))`;
+const row = (n: string, kind: string, text: string) =>
+    `RETURN ${n}.id AS id, ${kind} AS kind, ${text} AS text, ${pga.loc(n)}`;
+const exits = pga.list(["ReturnStatement", "ThrowStatement", "BreakStatement", "ContinueStatement"]);
+
+/** if (t) sink / t ? sink : x, and their else branches. */
+const branch: PGCypher = {
+    query: `MATCH (k) WHERE k.id = $sink
+MATCH (g)-[b:SON]->(br)
+WHERE g.type IN ['IfStatement', 'ConditionalExpression'] AND b.key IN ['consequent', 'alternate'] AND ${holds("br")} AND ${sameFunction("g")}
+MATCH (g)${pga.test}(t)
+WHERE ${tainted("t")}
+${row("t", "CASE g.type WHEN 'IfStatement' THEN 'if' ELSE 'ternary' END", "CASE b.key WHEN 'consequent' THEN 'must be true' ELSE 'must be false' END")}`,
+};
+
+/** sink = t ? x : y, the ternary being the sink value itself: the branch that carries the taint decides the polarity. */
+const sinkTernary: PGCypher = {
+    query: `MATCH (k:ConditionalExpression)-[b:SON]->(br), (k)${pga.test}(t)
+WHERE k.id = $sink AND b.key IN ['consequent', 'alternate'] AND ${tainted("br")} AND ${tainted("t")}
+${row("t", "'ternary'", "CASE b.key WHEN 'consequent' THEN 'must be true' ELSE 'must be false' END")}`,
+};
+
+/** t && sink, t || sink. */
+const logical: PGCypher = {
+    query: `MATCH (k) WHERE k.id = $sink
+MATCH (g)-[:SON {key: 'right'}]->(br)
+WHERE g.type = 'LogicalExpression' AND g.operator IN ['&&', '||'] AND ${holds("br")} AND ${sameFunction("g")}
+MATCH (g)${pga.left}(t)
+WHERE ${tainted("t")}
+${row("t", "'and-or'", "CASE g.operator WHEN '&&' THEN 'must be true' ELSE 'must be false' END")}`,
+};
+
+/** if (t) return; ... sink: an earlier statement of an enclosing block leaves when t holds. */
+const earlyExit: PGCypher = {
+    query: `MATCH (k) WHERE k.id = $sink
+MATCH (blk)-[b:SON {key: 'body'}]->(st), (blk)-[a:SON {key: 'body'}]->(g)
+WHERE blk.type IN ['BlockStatement', 'Program'] AND g.type = 'IfStatement' AND a.idx < b.idx AND ${holds("st")} AND ${sameFunction("blk")}
+  AND NOT EXISTS { MATCH (g)-[:SON {key: 'alternate'}]->() }
+MATCH (g)-[:SON {key: 'consequent'}]->(c), (g)${pga.test}(t)
+WHERE (c.type IN ${exits} OR EXISTS { MATCH (c)-[zb:SON {key: 'body'}]->(zx) WHERE zx.type IN ${exits} })
+  AND ${tainted("t")}
+${row("t", "'early-exit'", "'must be false'")}`,
+};
+
+/** switch (t) { case v: ... sink }: t must equal v, or under default match no case. */
+// shortcut: the case the sink sits in only, not the cases that fall through into it; add those if one shows up.
+const switchCase: PGCypher = {
+    query: `MATCH (k) WHERE k.id = $sink
+MATCH (sw)-[:SON {key: 'cases'}]->(sc)-[:SON {key: 'consequent'}]->(br)
+WHERE sw.type = 'SwitchStatement' AND ${holds("br")} AND ${sameFunction("sw")}
+MATCH (sw)-[:SON {key: 'discriminant'}]->(t)
+WHERE ${tainted("t")}
+OPTIONAL MATCH (sc)${pga.test}(v)
+${row("t", "'switch'", `CASE WHEN v IS NULL THEN 'must match no case' ELSE 'must equal ' + ${"CASE WHEN v.type = 'StringLiteral' THEN '\"' + v.value + '\"' ELSE coalesce(v.name, v.value, 'a ' + v.type) END"} END`)}`,
+};
+
+/** JSON.parse(x) on the way from the source to the sink: the payload must be valid JSON. */
+const jsonParse: PGCypher = {
+    query: `MATCH (c:CallExpression) WHERE c.id IN $flow
+MATCH (c)${pga.callee}(m:MemberExpression)${pga.property}(p:Identifier), (m)${pga.object}(o:Identifier), (c)${pga.arguments("ai")}(x)
+WHERE p.name = 'parse' AND o.name = 'JSON' AND ai.idx = 0
+  AND EXISTS { MATCH (c)-[:FLOWS_TO* ACYCLIC 0..8]->(zk)<-[:SON*0..5]-(zs) WHERE zs.id = $sink }
+${row("c", "'parse'", "'must be valid JSON'")}`,
+};
+
+/** The sink value is a + chain or template literal: the tainted part lands between these fixed strings. */
+// Only + and template nodes may stand between k and the part n: "<p>" + f(v) doesn't put v next to "<p>".
+const concatPart = (n: string) => `NOT EXISTS { MATCH (zc) WHERE zc.file = k.file AND zc.startOffset >= k.startOffset AND zc.endOffset <= k.endOffset
+  AND zc.startOffset <= ${n}.startOffset AND zc.endOffset >= ${n}.endOffset AND zc.id <> k.id AND zc.id <> ${n}.id AND NOT zc.type IN ['BinaryExpression', 'TemplateLiteral'] }`;
+const concat: PGCypher = {
+    query: `MATCH (k) WHERE k.id = $sink AND (k.type = 'TemplateLiteral' OR (k.type = 'BinaryExpression' AND k.operator = '+'))
+MATCH (x) WHERE ${inFlow("x")} AND x.file = k.file AND x.startOffset >= k.startOffset AND x.endOffset <= k.endOffset AND x.id <> k.id AND ${concatPart("x")}
+WITH k, min(x.startOffset) AS first, max(x.endOffset) AS last
+MATCH (l) WHERE l.type IN ['StringLiteral', 'TemplateElement'] AND l.value <> '' AND l.file = k.file AND l.startOffset >= k.startOffset AND l.endOffset <= k.endOffset
+  AND (l.endOffset <= first OR l.startOffset >= last) AND ${concatPart("l")}
+${row("l", "'string'", `CASE WHEN l.endOffset <= first THEN 'after ' ELSE 'before ' END + '"' + l.value + '"'`)}`,
+};
+
+// A node inside a guard test the queries above found.
+// By offsets, like the guards: a labelled SON*0..30 walk from the guard test made Ladybug start at every node of the
+// label (60s+ a query on a 196 MB graph, even with $found empty).
+const inGuard = (n: string, type = "") => `(zg) WHERE zg.id IN $found
+MATCH (${n}) WHERE ${n}.file = zg.file AND ${n}.startOffset >= zg.startOffset AND ${n}.endOffset <= zg.endOffset${type && ` AND ${n}.type = '${type}'`}`;
+const str = (n: string) => `CASE WHEN ${n}.type = 'StringLiteral' THEN '"' + ${n}.value + '"' ELSE coalesce(${n}.name, ${n}.value, 'a ' + ${n}.type) END`;
+const call = `(c)${pga.callee}(cm:MemberExpression)${pga.property}(p:Identifier)`;
+
+/** x.indexOf(s) compared with -1 or 0: contains / does not contain. */
+const indexOf: PGCypher = {
+    query: `MATCH ${inGuard("a", "BinaryExpression")}
+MATCH (a)${pga.left}(c:CallExpression)${pga.callee}(m:MemberExpression)${pga.property}(p:Identifier), (m)${pga.object}(o), (c)${pga.arguments("ai")}(s), (a)${pga.right}(r)
+WHERE p.name IN ['indexOf', 'lastIndexOf'] AND ai.idx = 0 AND ${inFlow("o")}
+OPTIONAL MATCH (r)${pga.argument}(ra:NumericLiteral)
+WITH a, s, CASE WHEN r.type = 'UnaryExpression' AND r.operator = '-' THEN '-' + ra.value ELSE r.value END AS n
+WITH a, s, a.operator + ' ' + n AS cmp
+WHERE cmp IN ['> -1', '!== -1', '!= -1', '>= 0', '=== -1', '== -1', '< 0']
+${row("a", "'check'", `CASE WHEN cmp IN ['=== -1', '== -1', '< 0'] THEN 'does not contain ' ELSE 'contains ' END + ${str("s")}`)}`,
+};
+
+/** x.includes(s), x.startsWith(s), x.endsWith(s). */
+const stringMethod: PGCypher = {
+    query: `MATCH ${inGuard("c", "CallExpression")}
+MATCH ${call}, (cm)${pga.object}(o), (c)${pga.arguments("ai")}(s)
+WHERE p.name IN ['includes', 'startsWith', 'endsWith'] AND ai.idx = 0 AND ${inFlow("o")}
+${row("c", "'check'", `CASE p.name WHEN 'includes' THEN 'contains ' WHEN 'startsWith' THEN 'starts with ' ELSE 'ends with ' END + ${str("s")}`)}`,
+};
+
+
+// /re/flags as written: the raw source Babel keeps in props.
+// JSON-escaped in props, so each \\\\ (one backslash in Cypher) halves.
+const regex = (r: string) => `replace(regexp_extract(${r}.props, '"raw":"(.*?)"', 1), '\\\\\\\\', '\\\\')`;
+
+/** /re/.test(x). */
+const regexTest: PGCypher = {
+    query: `MATCH ${inGuard("c", "CallExpression")}
+MATCH ${call}, (cm)${pga.object}(re:RegExpLiteral), (c)${pga.arguments("ai")}(o)
+WHERE p.name = 'test' AND ai.idx = 0 AND ${inFlow("o")}
+${row("c", "'check'", `'matches ' + ${regex("re")}`)}`,
+};
+
+/** x.match(/re/), x.search(/re/). */
+const regexMatch: PGCypher = {
+    query: `MATCH ${inGuard("c", "CallExpression")}
+MATCH ${call}, (cm)${pga.object}(o), (c)${pga.arguments("ai")}(re:RegExpLiteral)
+WHERE p.name IN ['match', 'search'] AND ai.idx = 0 AND ${inFlow("o")}
+${row("c", "'check'", `'matches ' + ${regex("re")}`)}`,
+};
+
+/** x === v, x !== v (either side), with a literal v. */
+const equality: PGCypher = {
+    query: `MATCH ${inGuard("a", "BinaryExpression")}
+MATCH (a)-[x:SON]->(o), (a)-[y:SON]->(l)
+WHERE a.operator IN ['===', '==', '!==', '!='] AND x.key <> y.key AND x.key IN ['left', 'right'] AND y.key IN ['left', 'right']
+  AND ${inFlow("o")} AND o.type IN ['Identifier', 'MemberExpression'] AND l.type IN ${pga.literals}
+${row("a", "'check'", `CASE WHEN a.operator IN ['===', '=='] THEN 'equals ' ELSE 'does not equal ' END + ${str("l")}`)}`,
+};
+
+/** typeof x === 't'. */
+const typeOf: PGCypher = {
+    query: `MATCH ${inGuard("a", "BinaryExpression")}
+MATCH (a)-[x:SON]->(u:UnaryExpression)${pga.argument}(o), (a)-[y:SON]->(l:StringLiteral)
+WHERE a.operator IN ['===', '==', '!==', '!='] AND u.operator = 'typeof' AND x.key <> y.key AND ${inFlow("o")}
+${row("a", "'check'", `CASE WHEN a.operator IN ['===', '=='] THEN 'is of type ' ELSE 'is not of type ' END + l.value`)}`,
+};
+
+/** x.length compared with a number. */
+const length: PGCypher = {
+    query: `MATCH ${inGuard("a", "BinaryExpression")}
+MATCH (a)${pga.left}(m:MemberExpression)${pga.property}(p:Identifier), (m)${pga.object}(o), (a)${pga.right}(n:NumericLiteral)
+WHERE p.name = 'length' AND ${inFlow("o")} AND a.operator IN ['>', '>=', '<', '<=', '===', '==', '!==', '!=']
+${row("a", "'check'", `'length ' + a.operator + ' ' + n.value`)}`,
+};
+
+/** The tainted value itself as a condition: if (x), x && ..., !x. */
+const truthy: PGCypher = {
+    query: `MATCH ${inGuard("o")}
+MATCH (o)
+WHERE ${inFlow("o")} AND o.type IN ['Identifier', 'MemberExpression']
+  AND NOT EXISTS { MATCH (zs)-[:SON {key: 'discriminant'}]->(o) WHERE zs.type = 'SwitchStatement' }
+  AND (zg.id = o.id OR EXISTS { MATCH (zp)-[zk:SON]->(o) WHERE (zp.type = 'LogicalExpression' AND zk.key IN ['left', 'right']) OR (zp.type = 'UnaryExpression' AND zp.operator = '!') })
+${row("o", "'check'", "'is truthy'")}`,
+};
+
+/** Guards first (checks read their tests from $found), then the checks. */
+export const interceptors: PGCypher[] = [branch, sinkTernary, logical, earlyExit, switchCase, jsonParse, concat, indexOf, stringMethod, regexTest, regexMatch, equality, typeOf, length, truthy];

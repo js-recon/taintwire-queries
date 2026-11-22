@@ -1,9 +1,11 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { messageData } from "../lib/postmessage.pgq";
 import { htmlSinks, jsExecSinks, navigationSinks } from "../lib/sinks.pgq";
+import { interceptors } from "../lib/interceptors.pgq";
 
 /** message event data reaches an HTML, JS execution or navigation sink */
 export const sink: PGSelector = {
+    interceptors,
     from: messageData,
     mode: "deep",
     maxHops: 8,
@@ -19,7 +21,7 @@ export default {
     name: `postMessage data reaches an HTML, JS execution or navigation sink`,
     severity: "high",
     message: `message event data reaches an HTML, JS execution or navigation sink`,
-    description: `Taint flow from the data of a message event (the first parameter's .data in an addEventListener('message', h) or onmessage = h listener, h inline or a named function/const) into an HTML sink, a JavaScript execution sink (eval, Function, string timers) or a navigation sink (location assignment, href, location.assign/replace, window.open, setAttribute of href/src/action/formaction/srcdoc). Listeners that compare event.origin/event.source exactly (===, !==, allowlist.has(e.origin), /re/.test(e.origin)) and Worker message listeners are left out; a substring check such as e.origin.indexOf(...) can be bypassed and still reports.`,
+    description: `Taint flow from the data of a message event (the first parameter's .data in an addEventListener('message', h) or onmessage = h listener, h inline or a named function/const) into an HTML sink, a JavaScript execution sink (eval, Function, string timers) or a navigation sink (location assignment, href, location.assign/replace, window.open, setAttribute of href/src/action/formaction/srcdoc, src of a created iframe/frame). Listeners that compare event.origin/event.source exactly (===, !==, allowlist.has(e.origin), /re/.test(e.origin)) and Worker message listeners are left out; a substring check such as e.origin.indexOf(...) can be bypassed and still reports.`,
     author: "shriyanss",
     tags: ["next", "vue", "react", "svelte", "angular"],
     return: [sink],

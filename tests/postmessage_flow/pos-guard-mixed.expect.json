@@ -1,0 +1,1 @@
+["if: must be true", "check: is of type string", "check: length > 3", "if: must be false", "check: starts with \"https://\"", "and-or: must be true", "check: does not equal \"x\"", "ternary: must be true", "check: matches /^\\/[a-z]/"]

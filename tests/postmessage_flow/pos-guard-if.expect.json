@@ -1,0 +1,1 @@
+["if: must be true", "check: contains \"http:\"", "check: contains \"https:\""]

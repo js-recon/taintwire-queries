@@ -1,9 +1,11 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlReadNoHref } from "../lib/sources.pgq";
 import { storageSinks } from "../lib/sinks.pgq";
+import { interceptors } from "../lib/interceptors.pgq";
 
 /** URL-derived value written to a cookie or web storage */
 export const sink: PGSelector = {
+    interceptors,
     from: urlReadNoHref,
     mode: "deep",
     maxHops: 8,

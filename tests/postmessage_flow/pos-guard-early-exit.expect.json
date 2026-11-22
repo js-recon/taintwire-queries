@@ -1,0 +1,1 @@
+["early-exit: must be false", "check: does not contain \"http\"", "check: matches /^https?:/i"]

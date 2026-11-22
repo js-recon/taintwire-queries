@@ -15,8 +15,10 @@ js-recon taintwire analyze -g example.pg -q taintwire-queries/rules
 | `lib/sinks.pgq` | Sink queries shared by two or more rules, as lists to spread into `cypher:`: `htmlSinks`, `scriptSinks`, `storageSinks`, `navigationSinks`, ... |
 | `lib/sources.pgq` | Taint sources shared by the rules: URL reads, `window.name`, response bodies, stored values, `Math.random()`, ... |
 | `lib/postmessage.pgq` | Message listeners and their `event.data` reads, chained with `uses` |
+| `lib/interceptors.pgq` | What could stop a value at a sink: the conditions the tainted value must pass (enclosing `if`/ternary, `&&`/`\|\|`, early `return`) and the checks inside them (`indexOf`, `startsWith`, regex tests, ...). Every rule's sink lists them in `interceptors`. |
 | `rules/<id>.pgq` | One rule per file. Each file exports its sink selector as `sink`, and the rule as its default export. |
 | `tests/<id>/pos.js`, `neg.js` | A snippet the rule must report, and one it must not. Extra cases go in `pos-<case>.js` and `neg-<case>.js`. |
+| `tests/<id>/<case>.expect.json` | Optional: the exact `"kind: text"` interceptor lines that case's findings must carry, such as `"if: must be true"`. Interceptors run only in cases that have one. |
 
 The 31 rules started as the taintwire rules of [js-recon-rules](https://github.com/js-recon/js-recon-rules), with the same queries.
 

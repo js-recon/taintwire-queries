@@ -28,6 +28,7 @@ export const pga = {
     source: son("source"),
     argument: son("argument"),
     init: son("init"),
+    test: son("test"),
     /** -[v:SON {key: 'arguments'}]->. Name the edge to test the argument's position: `a.idx = 1`. */
     arguments: (v = "") => `-[${v}:SON {key: 'arguments'}]->`,
     /** The same edges read from the child up to its parent: (o:Identifier)${pga.of.object}(m:MemberExpression) */

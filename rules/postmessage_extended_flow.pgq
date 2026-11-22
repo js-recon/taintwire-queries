@@ -1,5 +1,6 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { messageData } from "../lib/postmessage.pgq";
+import { interceptors } from "../lib/interceptors.pgq";
 import {
     frameworkHtmlSinks,
     scriptSinks,
@@ -13,6 +14,7 @@ import {
 
 /** message event data reaches a sensitive sink */
 export const sink: PGSelector = {
+    interceptors,
     from: messageData,
     mode: "deep",
     maxHops: 8,

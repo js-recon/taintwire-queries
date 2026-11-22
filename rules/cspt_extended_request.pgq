@@ -1,9 +1,11 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlReadNoHref, windowName } from "../lib/sources.pgq";
 import { requestExtendedSinks } from "../lib/sinks.pgq";
+import { interceptors } from "../lib/interceptors.pgq";
 
 /** URL-derived value reaches a request URL */
 export const sink: PGSelector = {
+    interceptors,
     from: [urlReadNoHref, windowName],
     mode: "deep",
     maxHops: 8,

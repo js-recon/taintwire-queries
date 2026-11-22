@@ -28,11 +28,19 @@ for (const rule of rules) {
         for (const name of tests.filter((f) => f === `${kind}.js` || f.startsWith(`${kind}-`))) {
             const graph = await taintwire.import(readFileSync(join(dir, name), "utf-8"), { filename: name, parser: "babel" });
             try {
-                const res = await taintwire.runPgq(graph, [rule]);
+                // <case>.expect.json: the "kind: text" interceptor lines the findings must carry, exactly.
+                // Interceptors run only for cases that have one, as they cost a query round per finding.
+                const expectFile = join(dir, name.replace(/\.js$/, ".expect.json"));
+                const expect = existsSync(expectFile) ? JSON.parse(readFileSync(expectFile, "utf-8")).sort() : null;
+                const bare = { ...rule, return: rule.return.map((s) => ("cypher" in s ? { ...s, interceptors: undefined } : s)) };
+                const res = await taintwire.runPgq(graph, [expect ? rule : bare]);
                 const fired = res.findings.length > 0;
-                const ok = !res.errors.length && fired === want;
+                const got = [...new Set(res.findings.flatMap((f) => (f.interceptors ?? []).map((i) => `${i.kind}: ${i.text}`)))].sort();
+                const intercepts = !expect || JSON.stringify(got) === JSON.stringify(expect);
+                const ok = !res.errors.length && fired === want && intercepts;
                 if (!ok) failed++;
                 console.log(`${ok ? "ok  " : "FAIL"} ${rule.id} ${name} (${res.findings.length} finding(s))${res.errors.map((e) => ` ${e.message}`).join("")}`);
+                if (!intercepts) console.log(`     interceptors: got ${JSON.stringify(got)}, want ${JSON.stringify(expect)}`);
             } finally {
                 await graph.close();
             }

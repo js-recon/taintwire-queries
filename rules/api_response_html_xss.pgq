@@ -1,9 +1,11 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { responseBody } from "../lib/sources.pgq";
 import { htmlSinks, frameworkHtmlSinks, jsExecSinks } from "../lib/sinks.pgq";
+import { interceptors } from "../lib/interceptors.pgq";
 
 /** response data reaches an HTML or JavaScript execution sink */
 export const sink: PGSelector = {
+    interceptors,
     from: responseBody,
     mode: "deep",
     maxHops: 8,

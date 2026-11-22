@@ -1,9 +1,11 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { clobberable } from "../lib/sources.pgq";
 import { scriptSinks, htmlSinks, navigationSinks, linkSinks } from "../lib/sinks.pgq";
+import { interceptors } from "../lib/interceptors.pgq";
 
 /** clobberable global reaches a script, HTML or navigation sink */
 export const sink: PGSelector = {
+    interceptors,
     from: clobberable,
     mode: "deep",
     maxHops: 8,

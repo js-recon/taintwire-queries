@@ -1,0 +1,1 @@
+["check: equals \"html\"", "check: equals \"nav\"", "if: must be false", "if: must be true", "parse: must be valid JSON", "string: after \"<a href='\"", "string: after \"<p>\"", "string: before \"'>go</a>\"", "string: before \"</p>\"", "switch: must match no case"]

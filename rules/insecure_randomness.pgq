@@ -1,6 +1,7 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { pga } from "../lib/pga.pgq";
 import { mathRandom } from "../lib/sources.pgq";
+import { interceptors } from "../lib/interceptors.pgq";
 
 // Only a name that says the value is a secret: an id, a sample rate or a storage probe made with Math.random() is harmless.
 const secret = "(?i).*(token|sess|sid|nonce|csrf|xsrf|auth|secret|otp|state|key|pass|salt|verifier).*";
@@ -8,6 +9,7 @@ const named = (k: string) => `(coalesce(${k}.name, ${k}.value) =~ '${secret}')`;
 
 /** Math.random()-derived value stored or sent as a token */
 export const sink: PGSelector = {
+    interceptors,
     from: mathRandom,
     mode: "deep",
     maxHops: 8,
