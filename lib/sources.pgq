@@ -18,11 +18,26 @@ WHERE k.name IN ['URL', 'URLSearchParams'] AND a.idx = 0 AND ${pga.named("n", "l
 ${pga.ret("'location'")}`,
 };
 
-/** A URL the page was loaded with: location.hash/search/href (also through window./document.location), document.URL/documentURI/referrer/baseURI, and new URL(location). */
-export const urlRead: PGSelector = { cypher: [pageUrl(["hash", "search", "href"]).cypher, locationObject] };
+/** The whole page URL (location or location.href, also through window./document.) that a regex takes parts of:
+ * `/url=(.+)/.exec(location)`, `location.href.match(...)`. A capture group is the query or fragment, not the current URL. */
+const wholeUrl = `(${pga.named("n", "location")} OR EXISTS { MATCH (n)${pga.property}(hp:Identifier), (n)${pga.object}(ho) WHERE hp.name = 'href' AND ${pga.named("ho", "location", "hq")} })`;
+const locationRegex = {
+    query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
+WHERE p.name = 'exec' AND a.idx = 0 AND ${wholeUrl}
+${pga.ret("'location'")}`,
+};
+const locationMatch = {
+    query: `MATCH ${pga.methodCall()}, (cm)${pga.object}(n)
+WHERE p.name IN ['match', 'matchAll'] AND ${wholeUrl}
+${pga.ret("'location'")}`,
+};
 
-/** urlRead without location.href (navigating to it is a no-op, so redirect rules leave it out). */
-export const urlReadNoHref = pageUrl(["hash", "search"]);
+/** A URL the page was loaded with: location.hash/search/href (also through window./document.location), document.URL/documentURI/referrer/baseURI, new URL(location), and regex parts of the whole URL. */
+export const urlRead: PGSelector = { cypher: [pageUrl(["hash", "search", "href"]).cypher, locationObject, locationRegex] };
+
+/** urlRead without location.href and the whole location object (navigating to them is a no-op, so redirect rules leave
+ * them out), except their regex parts. */
+export const urlReadNoHref: PGSelector = { cypher: [pageUrl(["hash", "search"]).cypher, locationRegex, locationMatch] };
 
 /** window.name, which survives cross-origin navigation. */
 export const windowName: PGSelector = {
