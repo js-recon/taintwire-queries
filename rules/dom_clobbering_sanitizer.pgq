@@ -1,0 +1,27 @@
+import type { PGRule, PGSelector } from "@js-recon/taintwire";
+import { pga } from "../lib/pga.pgq";
+
+/** an HTML sanitizer loops over node.attributes and removes the rejected ones */
+export const sink: PGSelector = {
+    cypher: [
+        // for (...; a < node.attributes.length; ...) { ...; node.removeAttribute(attr.name) }: a <form> holding
+        // <input id=attributes> makes node.attributes that input, so the loop sees no attributes and removes none.
+        // A sanitizer that checks for clobbering (DOMPurify's instanceof HTMLFormElement / NamedNodeMap) is left out.
+        { query: `MATCH (n:MemberExpression)${pga.property}(p:Identifier), (n)${pga.object}(o:Identifier)${pga.refersTo}(d),
+  ${pga.methodCall("c", "cm", "q")}, (cm)${pga.object}(o2:Identifier)${pga.refersTo}(d)
+WHERE p.name = 'attributes' AND q.name = 'removeAttribute' AND n.props CONTAINS '"computed":false'
+  AND NOT EXISTS { MATCH (z) WHERE z.file = n.file AND z.name IN ['HTMLFormElement', 'NamedNodeMap'] }
+${pga.ret("'removeAttribute loop over ' + o.name + '.attributes'")}` },
+    ],
+};
+
+export default {
+    id: "dom_clobbering_sanitizer",
+    name: `DOM clobbering: HTML sanitizer reads clobberable node.attributes`,
+    severity: "high",
+    message: `sanitizer filters attributes through node.attributes, which a named form control can clobber`,
+    description: `An HTML filter (HTMLJanitor and similar hand-rolled sanitizers) walks the parsed nodes and removes disallowed attributes by looping over node.attributes and calling node.removeAttribute. Named form controls shadow DOM properties of their form: in <form onfocus=...><input id=attributes>, form.attributes is the input, its length is undefined, the loop never runs and every attribute survives, including event handlers. Read attributes through Element.prototype getters or reject clobbered nodes (instanceof HTMLFormElement / attributes instanceof NamedNodeMap), as DOMPurify does.`,
+    author: "shriyanss",
+    tags: ["dom-clobbering", "sanitizer"],
+    return: [sink],
+} satisfies PGRule;
