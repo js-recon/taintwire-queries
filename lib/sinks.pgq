@@ -46,7 +46,7 @@ WHERE a1.idx = a0.idx + 1 AND kq.value IN ['innerHTML', 'outerHTML', 'srcdoc'] A
 ${pga.ret("'property-call'")}` },
 ];
 
-/** Parsed as HTML by a library: $(v)/jQuery(v) (not a selector string like "#" + v), .wrap/.wrapAll/.wrapInner/.parseHTML(v), Angular's bypassSecurityTrust*(v), document.execCommand('insertHTML', _, v). */
+/** Parsed as HTML by a library: $(v)/jQuery(v) (not a selector string like "#" + v), .wrap/.wrapAll/.wrapInner/.parseHTML(v), jQuery .append/.prepend/.after/.before/.replaceWith(v), Angular's bypassSecurityTrust*(v), document.execCommand('insertHTML', _, v). */
 export const frameworkHtmlSinks: PGCypher[] = [
     { query: `MATCH ${pga.call()}, (c)${pga.arguments("a")}(n)
 WHERE f.name IN ['$', 'jQuery'] AND a.idx = 0 AND ${pga.isGlobal("f")} AND NOT n.type IN ${pga.literals}
@@ -55,6 +55,15 @@ ${pga.ret("f.name")}` },
     { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
 WHERE p.name IN ['wrap', 'wrapAll', 'wrapInner', 'parseHTML'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
 ${pga.ret("p.name")}` },
+    // jQuery's DOM insertion parses a string as HTML; the DOM's own el.append/prepend/after/before/replaceWith insert
+    // it as text, so the receiver must look like jQuery: $(...)/jQuery(...) itself or a $-named variable or property.
+    // shortcut: one call deep ($(a).append(v), $el.append(v)); a chain like $(a).find(b).append(v) is missed.
+    { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n), (cm)${pga.object}(o)
+WHERE p.name IN ['append', 'prepend', 'after', 'before', 'replaceWith'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
+  AND (o.name STARTS WITH '$'
+    OR EXISTS { MATCH (o)${pga.callee}(jf:Identifier) WHERE jf.name IN ['$', 'jQuery'] }
+    OR EXISTS { MATCH (o)${pga.property}(jp:Identifier) WHERE jp.name STARTS WITH '$' })
+${pga.ret("'jquery.' + p.name")}` },
     { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(n)
 WHERE p.name IN ['bypassSecurityTrustHtml', 'bypassSecurityTrustScript', 'bypassSecurityTrustStyle', 'bypassSecurityTrustUrl', 'bypassSecurityTrustResourceUrl'] AND a.idx = 0 AND NOT n.type IN ${pga.literals}
 ${pga.ret("p.name")}` },

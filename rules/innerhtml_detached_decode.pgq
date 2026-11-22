@@ -1,0 +1,32 @@
+import type { PGRule, PGSelector } from "@js-recon/taintwire";
+import { pga } from "../lib/pga.pgq";
+
+/** a detached element's innerHTML is used to strip tags or decode entities */
+export const sink: PGSelector = {
+    cypher: [
+        // var d = document.createElement('div'); d.innerHTML = s; return d.textContent: the element isn't in the page,
+        // but it belongs to the live document, so <img src=x onerror=...> in s still loads and runs. A <textarea> or
+        // <template> (inert content) or an element of another document (DOMParser, createHTMLDocument) is safe.
+        // shortcut: a var/let/const-declared element only, not one assigned later (d = document.createElement(...)).
+        { query: `MATCH ${pga.methodCall()}, (c)${pga.arguments("a")}(t), (cm)${pga.object}(o)
+WHERE p.name = 'createElement' AND a.idx = 0 AND ${pga.named("o", "document")}
+  AND NOT (t.type = 'StringLiteral' AND lower(t.value) IN ['textarea', 'template'])
+MATCH (c)<-[:SON {key: 'init'}]-(:VariableDeclarator)-[:SON {key: 'id'}]->(d:Identifier)
+MATCH (d)${pga.referencedBy}(o1:Identifier)${pga.of.object}(m1:MemberExpression)${pga.property}(p1:Identifier), (m1)${pga.of.left}(asg:AssignmentExpression)${pga.right}(n)
+WHERE p1.name = 'innerHTML' AND NOT n.type IN ${pga.literals}
+MATCH (d)${pga.referencedBy}(o2:Identifier)${pga.of.object}(m2:MemberExpression)${pga.property}(p2:Identifier)
+WHERE p2.name IN ['textContent', 'innerText']
+RETURN DISTINCT n.id AS id, d.name + '.innerHTML then .' + p2.name AS kind, ${pga.loc()}` },
+    ],
+};
+
+export default {
+    id: "innerhtml_detached_decode",
+    name: `DOM XSS: innerHTML of a detached element used to strip tags or decode entities`,
+    severity: "medium",
+    message: `a value is written to a detached element's innerHTML to read its text back; any event handler in it runs`,
+    description: `A helper creates an element with document.createElement, assigns a value to its innerHTML and reads textContent/innerText back, to strip tags or decode HTML entities. The element is never inserted, but it belongs to the live document, so <img src=x onerror=...> in the value loads and runs its handler (HackerOne #406587, #753971, #308155). Use DOMParser or document.implementation.createHTMLDocument(), a <template>, or a <textarea> for decoding.`,
+    author: "shriyanss",
+    tags: ["dom-xss", "sanitizer"],
+    return: [sink],
+} satisfies PGRule;

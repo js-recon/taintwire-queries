@@ -1,0 +1,31 @@
+import type { PGRule, PGSelector } from "@js-recon/taintwire";
+import { urlRead, windowName } from "../lib/sources.pgq";
+import { pga } from "../lib/pga.pgq";
+import { interceptors } from "../lib/interceptors.pgq";
+
+/** URL-derived value is concatenated into a jQuery selector string */
+export const sink: PGSelector = {
+    interceptors,
+    from: [urlRead, windowName],
+    mode: "deep",
+    maxHops: 8,
+    cypher: [
+        // $("a[rel='" + hash + "']"): dom_xss_framework_sinks leaves out a string that leads with selector text, as
+        // jQuery >= 1.9 only parses HTML from a string starting with "<". jQuery < 1.9 parsed HTML anywhere in it.
+        { query: `MATCH ${pga.call()}, (c)${pga.arguments("a")}(n)
+WHERE f.name IN ['$', 'jQuery'] AND a.idx = 0 AND ${pga.isGlobal("f")} AND n.type IN ['BinaryExpression', 'TemplateLiteral']
+  AND ${pga.leads("n", "[[:space:]]*[^<[:space:]].*")}
+${pga.ret("f.name + '(selector)'")}` },
+    ],
+};
+
+export default {
+    id: "jquery_selector_url",
+    name: `jQuery selector injection: URL or window.name value concatenated into a $() selector`,
+    severity: "medium",
+    message: `URL-derived value is concatenated into a jQuery selector string`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into a string built for $()/jQuery() that starts with selector text, such as $("a[rel^='" + hash + "']") or jQuery('a[href="' + location.hash + '"]'). jQuery before 1.9 treats any string containing <tag> as HTML, so this is DOM XSS on those versions (HackerOne #396493, #704266). On current jQuery it is selector injection: the attacker picks which elements the code clicks, reads or changes.`,
+    author: "shriyanss",
+    tags: ["jquery", "dom-xss"],
+    return: [sink],
+} satisfies PGRule;

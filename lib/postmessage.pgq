@@ -34,6 +34,11 @@ RETURN h.id AS id` },
         { query: `MATCH (a:AssignmentExpression)${pga.left}(l:MemberExpression)${pga.property}(om:Identifier), (a)${pga.right}(h), (l)${pga.object}(o)
 WHERE om.name = 'onmessage' AND NOT ${nonWindowReceiver("o")}
 RETURN h.id AS id` },
+        // jQuery: $(window).on/bind/one('message', h). Only on a $()/jQuery() receiver: socket.on('message', h) is a server's message.
+        { query: `MATCH ${pga.methodCall("c", "cm", "ae")},
+      (c)${pga.arguments("a0")}(t:StringLiteral), (c)${pga.arguments("a1")}(h), (cm)${pga.object}(o:CallExpression)${pga.callee}(jf:Identifier)
+WHERE ae.name IN ['on', 'bind', 'one'] AND a0.idx = 0 AND a1.idx = 1 AND t.value = 'message' AND jf.name IN ['$', 'jQuery']
+RETURN h.id AS id` },
     ],
 };
 
@@ -52,10 +57,16 @@ RETURN fid AS id` },
     ],
 };
 
-/** event.data reads of a listener's first parameter. */
+/** event.data reads of a listener's first parameter, and event.originalEvent.data (a jQuery event wrapping the MessageEvent). */
 export const messageData: PGSelector = {
     uses: { listener },
-    cypher: { query: `MATCH (f)-[:SON {key: 'params', idx: 0}]->(d:Identifier)${pga.referencedBy}(e:Identifier)${pga.of.object}(n:MemberExpression)${pga.property}(p:Identifier)
+    cypher: [
+        { query: `MATCH (f)-[:SON {key: 'params', idx: 0}]->(d:Identifier)${pga.referencedBy}(e:Identifier)${pga.of.object}(n:MemberExpression)${pga.property}(p:Identifier)
 WHERE f.id IN $listener AND p.name = 'data'
 ${pga.ret("'data'")}` },
+        { query: `MATCH (f)-[:SON {key: 'params', idx: 0}]->(d:Identifier)${pga.referencedBy}(e:Identifier)${pga.of.object}(m:MemberExpression)${pga.property}(oe:Identifier),
+      (m)${pga.of.object}(n:MemberExpression)${pga.property}(p:Identifier)
+WHERE f.id IN $listener AND oe.name = 'originalEvent' AND p.name = 'data'
+${pga.ret("'originalEvent.data'")}` },
+    ],
 };

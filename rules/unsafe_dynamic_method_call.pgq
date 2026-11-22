@@ -1,25 +1,32 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlRead, windowName } from "../lib/sources.pgq";
+import { messageData } from "../lib/postmessage.pgq";
 import { pga } from "../lib/pga.pgq";
 import { interceptors } from "../lib/interceptors.pgq";
 
 /** URL-derived value selects a method to call */
 export const sink: PGSelector = {
     interceptors,
-    from: [urlRead, windowName],
+    from: [urlRead, windowName, messageData],
     mode: "deep",
     maxHops: 8,
-    cypher: { query: `MATCH (c:CallExpression)${pga.callee}(m:MemberExpression)${pga.property}(n)
+    cypher: [
+        { query: `MATCH (c:CallExpression)${pga.callee}(m:MemberExpression)${pga.property}(n)
 WHERE m.props CONTAINS '"computed":true' AND NOT n.type IN ${pga.literals}
 ${pga.ret("'obj[key]()'")}` },
+        // obj[key].apply(obj, args) / .call(...), the RPC-dispatch shape (reveal.js postMessage API).
+        { query: `MATCH (c:CallExpression)${pga.callee}(cm:MemberExpression)${pga.property}(ap:Identifier), (cm)${pga.object}(m:MemberExpression)${pga.property}(n)
+WHERE ap.name IN ['apply', 'call'] AND cm.props CONTAINS '"computed":false' AND m.props CONTAINS '"computed":true' AND NOT n.type IN ${pga.literals}
+${pga.ret("'obj[key].' + ap.name + '()'")}` },
+    ],
 };
 
 export default {
     id: "unsafe_dynamic_method_call",
-    name: `Unsafe dynamic method call: URL or window.name value selects the method to call`,
+    name: `Unsafe dynamic method call: URL, window.name or postMessage value selects the method to call`,
     severity: "medium",
     message: `URL-derived value selects a method to call`,
-    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name into the computed property of a call (obj[name](...)). An attacker chooses which method runs, for example constructor, a privileged handler, or a gadget such as Function via obj.constructor.constructor.`,
+    description: `Taint flow from a URL read (location.hash/search/href, document.URL/documentURI/referrer/baseURI) or window.name, or from the data of a message event, into the computed property of a call (obj[name](...), obj[name].apply/call(...)). An attacker chooses which method runs, for example constructor, a privileged handler, or a gadget such as Function via obj.constructor.constructor.`,
     author: "shriyanss",
     tags: ["next", "vue", "react", "svelte", "angular"],
     return: [sink],
