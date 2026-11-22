@@ -8,7 +8,7 @@
     },
     "license": "MIT",
     "devDependencies": {
-        "@js-recon/taintwire": "0.2.0-alpha.2"
+        "@js-recon/taintwire": "0.2.0-alpha.5"
     },
     "engines": {
         "node": ">=22.18"
