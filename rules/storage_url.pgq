@@ -1,5 +1,5 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
-import { urlReadNoHref } from "../lib/sources.pgq";
+import { urlReadNoHref, wholeUrlRead } from "../lib/sources.pgq";
 import { storageSinks } from "../lib/sinks.pgq";
 import { interceptors } from "../lib/interceptors.pgq";
 
@@ -12,13 +12,22 @@ export const sink: PGSelector = {
     cypher: storageSinks,
 };
 
+/** The whole page URL written raw to a cookie: its query can carry `;` (cookie attributes) and is often reflected later. */
+export const wholeUrlCookie: PGSelector = {
+    interceptors,
+    from: wholeUrlRead,
+    mode: "deep",
+    maxHops: 8,
+    cypher: storageSinks[0],
+};
+
 export default {
     id: "storage_url",
     name: `Storage manipulation: URL value written to a cookie or web storage`,
     severity: "low",
     message: `URL-derived value written to a cookie or web storage`,
-    description: `Taint flow from location.hash/search or document.URL/documentURI/referrer/baseURI into document.cookie or localStorage/sessionStorage.setItem. location.href is not a source here: storing the current URL (return-to after login) is common and benign.`,
+    description: `Taint flow from location.hash/search or document.URL/documentURI/referrer/baseURI into document.cookie or localStorage/sessionStorage.setItem. The whole page URL (location, location.href) counts only when it reaches document.cookie unencoded: its query can add cookie attributes with ';' and is often reflected later. Storing it in web storage (return-to after login) is common and benign.`,
     author: "shriyanss",
     tags: ["next", "vue", "react", "svelte", "angular"],
-    return: [sink],
+    return: [sink, wholeUrlCookie],
 } satisfies PGRule;

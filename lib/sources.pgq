@@ -32,6 +32,16 @@ WHERE p.name IN ['match', 'matchAll'] AND ${wholeUrl}
 ${pga.ret("'location'")}`,
 };
 
+/** The whole page URL used as a value (`"x=" + window.location`, `location.href`), not read through (`location.hash`),
+ * assigned to, or directly encoded (encodeURIComponent/escape/btoa). Joined nodes are label-free: a label missing from
+ * the graph fails the query. */
+export const wholeUrlRead: PGSelector = {
+    cypher: { query: `MATCH (n) WHERE n.type IN ['Identifier', 'MemberExpression'] AND ${wholeUrl}
+  AND NOT EXISTS { MATCH (zp)-[zs:SON]->(n) WHERE zs.key IN ['property', 'key'] OR (zs.key = 'object' AND zp.type IN ['MemberExpression', 'OptionalMemberExpression']) OR (zs.key = 'left' AND zp.type = 'AssignmentExpression') }
+  AND NOT EXISTS { MATCH (zc)-[:SON {key: 'arguments'}]->(n), (zc)-[:SON {key: 'callee'}]->(zk) WHERE zc.type = 'CallExpression' AND zk.name IN ['encodeURIComponent', 'escape', 'btoa'] }
+${pga.ret("'location'")}` },
+};
+
 /** A URL the page was loaded with: location.hash/search/href (also through window./document.location), document.URL/documentURI/referrer/baseURI, new URL(location), and regex parts of the whole URL. */
 export const urlRead: PGSelector = { cypher: [pageUrl(["hash", "search", "href"]).cypher, locationObject, locationRegex] };
 
