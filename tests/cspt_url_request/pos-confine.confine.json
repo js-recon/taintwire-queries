@@ -1,0 +1,6 @@
+[
+    "path: after \"/api/x?id=\", URI-component encoded",
+    "query: after \"/api/x?id=\", URI-component encoded",
+    "path: after \"/api/search?q=\"",
+    "query: after \"/api/search?q=\""
+]

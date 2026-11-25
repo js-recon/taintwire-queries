@@ -1,0 +1,4 @@
+[
+    "selector: after \"#menu-item-\", not \"<\": a selector on jQuery >= 1.9",
+    "selector: after \"div a[name=\"\", not \"<\": a selector on jQuery >= 1.9"
+]

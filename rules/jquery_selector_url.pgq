@@ -2,10 +2,12 @@ import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlRead, windowName } from "../lib/sources.pgq";
 import { pga } from "../lib/pga.pgq";
 import { interceptors } from "../lib/interceptors.pgq";
+import { selectorConfinements } from "../lib/confinements.pgq";
 
 /** URL-derived value is concatenated into a jQuery selector string */
 export const sink: PGSelector = {
     interceptors,
+    confinements: selectorConfinements,
     from: [urlRead, windowName],
     mode: "deep",
     maxHops: 8,

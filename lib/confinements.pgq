@@ -1,0 +1,178 @@
+// Confinements (Ξ): how a finding's tainted value ends up in its sink, as the fixed structure around it that limits
+// what it can do. An interceptor is a condition on the path or a change to the value; a confinement is a position.
+// A rule lists them in `confinements`, and taintwire runs them once per finding with $sink, $source, $flow (every
+// node the source reaches, as the rule's deep flow does) and $path (the node ids from source to sink, in order).
+//
+//   path      the string starts with "/" and a fixed character other than "/" or "\" (a same-origin path), or is
+//             a relative path whose fixed start has a "/" before any ":", so it can't become a scheme
+//   query     a fixed "?" comes before the tainted part, and nothing before it is tainted
+//   fragment  the same with "#"
+//   origin    a fixed scheme and authority come before the tainted part, closed by "/", "\", "?" or "#":
+//             "https://host/", location.origin + "/", location.protocol + "//" + location.host + location.pathname
+//   selector  a $()/jQuery() string whose first non-space character is fixed and not "<", or location.hash itself
+//             (always "#..."). jQuery >= 1.9 parses HTML only from a string that starts with "<".
+//   sink      the sink API confines the value: history.pushState/replaceState (same-origin URLs only, the browser
+//             throws otherwise) and postMessage(v, origin) with a pinned origin
+//
+// The string kinds are read at the last +, template or .concat() on $path (the one nearest the sink): a later
+// concat decides where the value lands, so an earlier one doesn't count. The chain is cut into its leaf parts,
+// ordered by offset, and turned into a "shape": fixed strings as they are, an untainted dynamic part as "§" (a few
+// known ones as what they always look like: x.pathname is "/§", location.origin "§://§", x.protocol "§:"), and the
+// first tainted part as a marker: "⊕" for encodeURIComponent(...) (no "/", "\", ":", "<", "?" or "#" can come out),
+// "⓪" for parseInt/parseFloat/Number(...), "◆" for anything else. Each kind is then a regex on the shape up to the
+// marker (a raw location.search / location.hash part is "?◇" / "#◇": it is always "" or starts with that
+// character). A tainted part is one that holds a $flow node, so a prefix part tainted by the same source ends the prefix.
+import type { PGCypher } from "@js-recon/taintwire";
+import { pga } from "./pga.pgq";
+
+const within = (n: string, c: string) =>
+    `${n}.file = ${c}.file AND ${n}.startOffset >= ${c}.startOffset AND ${n}.endOffset <= ${c}.endOffset`;
+/** x.concat(...) and its callee x.concat: a String.prototype.concat chain joins like +. */
+const concatCall = (z: string) =>
+    `(${z}.type = 'CallExpression' AND EXISTS { MATCH (${z})-[:SON {key: 'callee'}]->(${z}m)-[:SON {key: 'property'}]->(${z}q) WHERE ${z}m.type = 'MemberExpression' AND ${z}q.name = 'concat' })`;
+const concatMember = (z: string) =>
+    `(${z}.type = 'MemberExpression' AND EXISTS { MATCH (${z})-[:SON {key: 'property'}]->(${z}q) WHERE ${z}q.name = 'concat' })`;
+// x = 'a' OR x = 'b': inside the CASE below, after the OPTIONAL MATCHes, Ladybug evaluates `x IN [...]` to false.
+const oneOf = (x: string, values: string[]) => `(${values.map((v) => `${x} = '${v}'`).join(" OR ")})`;
+/** A node that joins strings: a + chain, a template literal or a .concat() call. */
+const joins = (z: string) => `((${z}.type = 'BinaryExpression' AND ${z}.operator = '+') OR ${z}.type = 'TemplateLiteral' OR ${concatCall(z)})`;
+/** The object of `o.origin` / `o.host` is the page's location or a computed value, not a bare name such as the e of e.origin (the sender's origin in a message handler). */
+const ownObject = (o: string) => `(coalesce(${o}.type, '') <> 'Identifier' OR coalesce(${o}.name, '') = 'location')`;
+
+// Shape markers and the fixed-character classes the regexes use. \x5c is "\" (a literal backslash doesn't survive
+// Ladybug's string and regex escaping).
+const MARK = "◆⊕⓪◇";
+const NOT_FIXED = "§◆"; // the character there is not known
+// JavaScript's \s, which jQuery's quick-expression regex skips before "<": RE2's \s is ASCII only.
+const JS_SPACE = " \\x09\\x0a\\x0b\\x0c\\x0d\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+
+/**
+ * MATCHes the last string join on $path (c) and binds `pre`: its shape up to and including the first tainted
+ * part's marker. `anchor` is an optional MATCH that must hold first (the sink's call, for selectors).
+ */
+const shape = (anchor = "") => `${anchor}
+MATCH (zc) WHERE zc.id IN $path AND ${joins("zc")}
+WITH max(list_position($path, zc.id)) AS last
+MATCH (c) WHERE c.id = list_extract($path, last)
+MATCH (p) WHERE ${within("p", "c")} AND p.id <> c.id AND NOT ${joins("p")} AND NOT ${concatMember("p")}
+  AND NOT EXISTS { MATCH (zp)-[:SON {key: 'property'}]->(p) WHERE ${concatMember("zp")} }
+  AND NOT EXISTS { MATCH (z) WHERE ${within("z", "c")} AND z.startOffset <= p.startOffset AND z.endOffset >= p.endOffset
+    AND z.id <> c.id AND z.id <> p.id AND NOT ${joins("z")} AND NOT ${concatMember("z")} }
+OPTIONAL MATCH (p)-[:SON {key: 'property'}]->(pq), (p)-[:SON {key: 'object'}]->(po)
+OPTIONAL MATCH (po)-[:SON {key: 'property'}]->(pol)
+OPTIONAL MATCH (p)-[:SON {key: 'callee'}]->(pf)
+// A part is tainted when a $flow node is inside it: every row of a tainted part has a zt, an untainted one has
+// only the null row.
+OPTIONAL MATCH (zt) WHERE zt.id IN $flow AND ${within("zt", "p")}
+// Ladybug workarounds in this query, each found on a fixture: no EXISTS here (one on the optional po segfaulted
+// in the aggregation below; one comparing with p failed as "Cannot evaluate expression with type PROPERTY"), no
+// WITH between the OPTIONAL MATCHes and the aggregation (a projected "zt IS NOT NULL" segfaulted), no IN list
+// in the CASE (oneOf), and no ORDER BY ... LIMIT before it (max() above).
+WITH c.id AS cid, c.file AS file, c.line AS line, c.col AS col, lpad(cast(p.startOffset, 'STRING'), 10, '0') + '|' + CASE
+    WHEN zt IS NOT NULL AND p.type = 'CallExpression' AND pf.name = 'encodeURIComponent' THEN '⊕'
+    WHEN zt IS NOT NULL AND p.type = 'CallExpression' AND ${oneOf("pf.name", ["parseInt", "parseFloat", "Number"])} THEN '⓪'
+    WHEN zt IS NOT NULL AND p.type = 'MemberExpression' AND ${oneOf("pq.name", ["search", "hash"])} AND (coalesce(po.name, '') = 'location' OR coalesce(pol.name, '') = 'location') THEN CASE pq.name WHEN 'search' THEN '?◇' ELSE '#◇' END
+    WHEN zt IS NOT NULL THEN '◆'
+    WHEN ${oneOf("p.type", ["StringLiteral", "TemplateElement", "NumericLiteral"])} THEN cast(p.value, 'STRING')
+    WHEN p.type = 'MemberExpression' AND pq.name = 'pathname' THEN '/§'
+    WHEN p.type = 'MemberExpression' AND pq.name = 'origin' AND ${ownObject("po")} THEN '§://§'
+    WHEN p.type = 'MemberExpression' AND pq.name = 'protocol' THEN '§:'
+    ELSE '§' END AS piece
+WITH cid, file, line, col, list_sort(collect(DISTINCT piece)) AS pieces
+WITH cid, file, line, col, list_reduce(list_transform(pieces, e -> substring(e, 12, size(e))), (a, b) -> a + b) AS whole
+WITH cid, file, line, col, regexp_extract(whole, '^[^${MARK}]*[${MARK}]', 0) AS pre
+WHERE pre <> ''
+WITH cid, file, line, col, pre, substring(pre, size(pre), 1) AS mark
+// ◇ is location.search / location.hash: its "?" / "#" is shown as the name, not as a fixed string
+WITH cid, file, line, col, pre, mark, replace(substring(pre, 1, size(pre) - CASE mark WHEN '◇' THEN 2 ELSE 1 END), '§', '…') AS fixed,
+  CASE mark WHEN '◇' THEN CASE substring(pre, size(pre) - 1, 1) WHEN '?' THEN ', in location.search' ELSE ', in location.hash' END ELSE '' END AS within`;
+
+const text = `CASE WHEN fixed = '' THEN 'at the start' ELSE 'after "' + fixed + '"' END + within + CASE mark WHEN '⊕' THEN ', URI-component encoded' WHEN '⓪' THEN ', as a number' ELSE '' END`;
+
+// Up to the marker. A path's second character must be fixed and not "/", "\", tab or newline (the URL parser
+// drops those, so "/\t/evil.example" is "//evil.example").
+const URL_KINDS: [string, string][] = [
+    ["path", `(/[^/\\x5c\\x09\\x0a\\x0d${NOT_FIXED}]|[.A-Za-z0-9_~-][^:/\\x5c?#${NOT_FIXED}${MARK}]*/|[⊕⓪]).*`],
+    ["query", `[^?#${MARK}]*[?].*`],
+    ["fragment", `[^?#${MARK}]*#.*`],
+    ["origin", `([A-Za-z][A-Za-z0-9+.-]*:|§:)?//[^/\\x5c?#${MARK}]+[/\\x5c?#].*`],
+];
+
+const CODE_CALLS = ["eval", "globalEval", "execScript", "setImmediate", "setTimeout", "setInterval", "Function"];
+
+/**
+ * The sink takes a URL, not HTML or code, which some URL rules' sink sets also hold: srcdoc (HTML), a script's
+ * text/textContent, an on* attribute, eval-like calls. Where the value lands in a URL means nothing there.
+ * shortcut: setAttribute with a computed name (a generic attribute setter) counts as a URL; the name
+ * could be srcdoc. Upgrade if a confined finding turns out to write srcdoc.
+ */
+const urlSink = `MATCH (k) WHERE k.id = $sink
+  AND NOT EXISTS { MATCH (za)-[:SON {key: 'right'}]->(k), (za)-[:SON {key: 'left'}]->(zl)-[:SON {key: 'property'}]->(zq)
+    WHERE za.type = 'AssignmentExpression' AND zl.type = 'MemberExpression' AND zq.name IN ['srcdoc', 'text', 'textContent', 'innerText', 'innerHTML', 'outerHTML'] }
+  AND NOT EXISTS { MATCH (zc)-[zi:SON {key: 'arguments'}]->(k), (zc)-[zj:SON {key: 'arguments'}]->(zn)
+    WHERE zc.type = 'CallExpression' AND zi.idx >= 1 AND zj.idx = 0 AND zn.type = 'StringLiteral' AND (zn.value = 'srcdoc' OR zn.value STARTS WITH 'on') }
+  AND NOT EXISTS { MATCH (zc)-[:SON {key: 'arguments'}]->(k), (zc)-[:SON {key: 'callee'}]->(zf)
+    WHERE zc.type = 'CallExpression' AND (zf.name IN ${pga.list(CODE_CALLS)} OR EXISTS { MATCH (zf)-[:SON {key: 'property'}]->(zp) WHERE zp.name IN ${pga.list(CODE_CALLS)} }) }
+WITH DISTINCT k`;
+
+/** path / query / fragment / origin at the last string join on the path. */
+const urlPosition: PGCypher = {
+    query: `${shape(urlSink)}
+UNWIND ${pga.list(URL_KINDS.map(([k]) => k))} AS kind
+WITH cid, file, line, col, pre, mark, fixed, within, kind
+WHERE ${URL_KINDS.map(([k, re]) => `(kind = '${k}' AND regexp_full_match(pre, '${re}'))`).join("\n   OR ")}
+RETURN cid AS id, kind, ${text} AS text, file, line, col`,
+};
+
+/** The sink is the first argument of $()/jQuery(). */
+const jquerySink = `MATCH (k) WHERE k.id = $sink
+MATCH (zc)-[za:SON {key: 'arguments'}]->(k), (zc)-[:SON {key: 'callee'}]->(zf)
+WHERE zc.type = 'CallExpression' AND za.idx = 0 AND zf.type = 'Identifier' AND zf.name IN ['$', 'jQuery']
+WITH DISTINCT k`;
+
+/** A $()/jQuery() string whose first non-space character is fixed and not "<". */
+const selectorPosition: PGCypher = {
+    query: `${shape(jquerySink)}
+WHERE regexp_full_match(pre, '[${JS_SPACE}]*[^<${JS_SPACE}${NOT_FIXED}].*')
+RETURN cid AS id, 'selector' AS kind, ${text} + ', not "<": a selector on jQuery >= 1.9' AS text, file, line, col`,
+};
+
+/** $(location.hash): the value is always "" or "#...", and nothing on the path changes it. */
+const hashSelector: PGCypher = {
+    query: `${jquerySink}
+MATCH (s)-[:SON {key: 'property'}]->(sp) WHERE s.id = $source AND s.type = 'MemberExpression' AND sp.name = 'hash'
+  AND NOT EXISTS { MATCH (z) WHERE z.id IN $path AND z.id <> s.id AND NOT z.type IN ['Identifier', 'VariableDeclarator', 'AssignmentExpression'] }
+RETURN k.id AS id, 'selector' AS kind, 'location.hash, starts with "#": a selector on jQuery >= 1.9' AS text, ${pga.loc("k")}`,
+};
+
+/** history.pushState/replaceState(state, title, v): the browser throws on a URL of another origin. */
+const historySink: PGCypher = {
+    query: `MATCH (k) WHERE k.id = $sink
+MATCH (c)-[a:SON {key: 'arguments'}]->(k), (c)-[:SON {key: 'callee'}]->(m)-[:SON {key: 'property'}]->(p)
+WHERE c.type = 'CallExpression' AND a.idx = 2 AND m.type = 'MemberExpression' AND p.name IN ['pushState', 'replaceState']
+RETURN c.id AS id, 'sink' AS kind, p.name + ': same-origin URLs only' AS text, ${pga.loc("c")}`,
+};
+
+/**
+ * x.postMessage(v, origin) with the tainted value in v and an untainted, pinned origin: a literal other than "*",
+ * or the page's own / a computed origin (location.origin, location.protocol + "//" + location.host,
+ * new URL(u, base).origin). e.origin is not pinned: in a message handler it is whoever sent the message.
+ */
+const pinnedPostMessage: PGCypher = {
+    query: `MATCH (k) WHERE k.id = $sink
+MATCH (c)-[a0:SON {key: 'arguments'}]->(d), (c)-[a1:SON {key: 'arguments'}]->(o), (c)-[:SON {key: 'callee'}]->(m)-[:SON {key: 'property'}]->(p)
+WHERE c.type = 'CallExpression' AND a0.idx = 0 AND a1.idx = 1 AND m.type = 'MemberExpression' AND p.name = 'postMessage' AND ${within("k", "d")}
+  AND NOT EXISTS { MATCH (zt) WHERE zt.id IN $flow AND ${within("zt", "o")} }
+  AND ((o.type = 'StringLiteral' AND o.value <> '*')
+    OR EXISTS { MATCH (zm)-[:SON {key: 'property'}]->(zq), (zm)-[:SON {key: 'object'}]->(zo)
+      WHERE ${within("zm", "o")} AND zm.type = 'MemberExpression' AND zq.name IN ['origin', 'host']
+        AND (zm.id = o.id OR zq.name = 'host') AND ${ownObject("zo")} AND (zq.name = 'origin' OR ${pga.named("zo", "location", "zl")}) })
+RETURN c.id AS id, 'sink' AS kind, CASE WHEN o.type = 'StringLiteral' THEN 'postMessage only to "' + o.value + '"' ELSE 'postMessage only to a fixed origin' END AS text, ${pga.loc("c")}`,
+};
+
+/** URL sinks (navigation, links, requests, history): where in the URL the value lands, and sinks that confine it. */
+export const confinements: PGCypher[] = [urlPosition, historySink, pinnedPostMessage];
+/** jQuery $() sinks: a selector string, not HTML. */
+export const selectorConfinements: PGCypher[] = [selectorPosition, hashSelector];
+/** postMessage sinks: a pinned target origin. */
+export const messageConfinements: PGCypher[] = [pinnedPostMessage];

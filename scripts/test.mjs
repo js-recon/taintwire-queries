@@ -32,15 +32,22 @@ for (const rule of rules) {
                 // Interceptors run only for cases that have one, as they cost a query round per finding.
                 const expectFile = join(dir, name.replace(/\.js$/, ".expect.json"));
                 const expect = existsSync(expectFile) ? JSON.parse(readFileSync(expectFile, "utf-8")).sort() : null;
-                const bare = { ...rule, return: rule.return.map((s) => ("cypher" in s ? { ...s, interceptors: undefined } : s)) };
-                const res = await taintwire.runPgq(graph, [expect ? rule : bare]);
+                // <case>.confine.json: the same for confinements
+                const confineFile = join(dir, name.replace(/\.js$/, ".confine.json"));
+                const confine = existsSync(confineFile) ? JSON.parse(readFileSync(confineFile, "utf-8")).sort() : null;
+                const sel = (s) => ("cypher" in s ? { ...s, ...(!expect && { interceptors: undefined }), ...(!confine && { confinements: undefined }) } : s);
+                const res = await taintwire.runPgq(graph, [{ ...rule, return: rule.return.map(sel) }]);
                 const fired = res.findings.length > 0;
-                const got = [...new Set(res.findings.flatMap((f) => (f.interceptors ?? []).map((i) => `${i.kind}: ${i.text}`)))].sort();
+                const lines = (key) => [...new Set(res.findings.flatMap((f) => (f[key] ?? []).map((i) => `${i.kind}: ${i.text}`)))].sort();
+                const got = lines("interceptors");
+                const gotConfine = lines("confinements");
                 const intercepts = !expect || JSON.stringify(got) === JSON.stringify(expect);
-                const ok = !res.errors.length && fired === want && intercepts;
+                const confines = !confine || JSON.stringify(gotConfine) === JSON.stringify(confine);
+                const ok = !res.errors.length && fired === want && intercepts && confines;
                 if (!ok) failed++;
                 console.log(`${ok ? "ok  " : "FAIL"} ${rule.id} ${name} (${res.findings.length} finding(s))${res.errors.map((e) => ` ${e.message}`).join("")}`);
                 if (!intercepts) console.log(`     interceptors: got ${JSON.stringify(got)}, want ${JSON.stringify(expect)}`);
+                if (!confines) console.log(`     confinements: got ${JSON.stringify(gotConfine)}, want ${JSON.stringify(confine)}`);
             } finally {
                 await graph.close();
             }

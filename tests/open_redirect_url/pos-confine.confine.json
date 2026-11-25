@@ -1,0 +1,12 @@
+[
+    "path: after \"/article/…\", in location.search",
+    "query: after \"/article/…\", in location.search",
+    "path: after \"/login?redirect=\"",
+    "query: after \"/login?redirect=\"",
+    "fragment: after \"/…#\"",
+    "origin: after \"https://…/…\", in location.search",
+    "query: after \"https://…/…\", in location.search",
+    "path: after \"/\", as a number",
+    "path: after \"/\", URI-component encoded",
+    "path: after \"/app/\""
+]

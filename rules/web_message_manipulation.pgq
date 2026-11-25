@@ -2,10 +2,12 @@ import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlRead, windowName } from "../lib/sources.pgq";
 import { pga } from "../lib/pga.pgq";
 import { interceptors } from "../lib/interceptors.pgq";
+import { messageConfinements } from "../lib/confinements.pgq";
 
 /** URL-derived value sent with postMessage */
 export const sink: PGSelector = {
     interceptors,
+    confinements: messageConfinements,
     from: [urlRead, windowName],
     mode: "deep",
     maxHops: 8,

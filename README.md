@@ -16,9 +16,11 @@ js-recon taintwire analyze -g example.pg -q taintwire-queries/rules
 | `lib/sources.pgq` | Taint sources shared by the rules: URL reads, `window.name`, response bodies, stored values, `Math.random()`, ... |
 | `lib/postmessage.pgq` | Message listeners and their `event.data` reads, chained with `uses` |
 | `lib/interceptors.pgq` | What could stop a value at a sink: the conditions the tainted value must pass (enclosing `if`/ternary, `&&`/`\|\|`, early `return`) and the checks inside them (`indexOf`, `startsWith`, regex tests, ...). Every rule's sink lists them in `interceptors`. |
+| `lib/confinements.pgq` | How a value ends up in a sink: a same-origin `path`, the `query` or `fragment`, a fixed `origin`, a jQuery `selector` that can't start with `<`, or a `sink` API that confines it (`history.pushState`/`replaceState`, `postMessage` to a pinned origin). Listed in `confinements` on the URL, request, jQuery selector and postMessage sinks. |
 | `rules/<id>.pgq` | One rule per file. Each file exports its sink selector as `sink`, and the rule as its default export. |
 | `tests/<id>/pos.js`, `neg.js` | A snippet the rule must report, and one it must not. Extra cases go in `pos-<case>.js` and `neg-<case>.js`. |
 | `tests/<id>/<case>.expect.json` | Optional: the exact `"kind: text"` interceptor lines that case's findings must carry, such as `"if: must be true"`. Interceptors run only in cases that have one. |
+| `tests/<id>/<case>.confine.json` | The same for confinements, such as `"path: after \"/login?next=\""`. Confinements run only in cases that have one. |
 
 The 31 rules started as the taintwire rules of [js-recon-rules](https://github.com/js-recon/js-recon-rules), with the same queries.
 

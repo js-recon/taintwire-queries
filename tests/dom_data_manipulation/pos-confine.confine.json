@@ -1,0 +1,6 @@
+[
+    "sink: pushState: same-origin URLs only",
+    "sink: replaceState: same-origin URLs only",
+    "path: after \"/video/…\", in location.hash",
+    "fragment: after \"/video/…\", in location.hash"
+]

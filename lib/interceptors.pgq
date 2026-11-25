@@ -96,7 +96,10 @@ const concatPart = (n: string) => `NOT EXISTS { MATCH (zc) WHERE zc.file = k.fil
   AND zc.startOffset <= ${n}.startOffset AND zc.endOffset >= ${n}.endOffset AND zc.id <> k.id AND zc.id <> ${n}.id AND NOT zc.type IN ['BinaryExpression', 'TemplateLiteral'] }`;
 const concat: PGCypher = {
     query: `MATCH (k) WHERE k.id = $sink AND (k.type = 'TemplateLiteral' OR (k.type = 'BinaryExpression' AND k.operator = '+'))
+// x is a tainted operand, not a + or template node: $flow holds the expressions wrapping the source too, and the
+// inner 'pre' + t of 'pre' + t + 'suf' would move first to the start of 'pre'
 MATCH (x) WHERE ${inFlow("x")} AND x.file = k.file AND x.startOffset >= k.startOffset AND x.endOffset <= k.endOffset AND x.id <> k.id AND ${concatPart("x")}
+  AND NOT (x.type = 'TemplateLiteral' OR (x.type = 'BinaryExpression' AND x.operator = '+'))
 WITH k, min(x.startOffset) AS first, max(x.endOffset) AS last
 MATCH (l) WHERE l.type IN ['StringLiteral', 'TemplateElement'] AND l.value <> '' AND l.file = k.file AND l.startOffset >= k.startOffset AND l.endOffset <= k.endOffset
   AND (l.endOffset <= first OR l.startOffset >= last) AND ${concatPart("l")}

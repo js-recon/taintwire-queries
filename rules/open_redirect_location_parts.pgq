@@ -2,10 +2,12 @@ import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { urlReadNoHref } from "../lib/sources.pgq";
 import { pga } from "../lib/pga.pgq";
 import { interceptors } from "../lib/interceptors.pgq";
+import { confinements } from "../lib/confinements.pgq";
 
 /** URL-derived value navigates the page */
 export const sink: PGSelector = {
     interceptors,
+    confinements,
     from: urlReadNoHref,
     mode: "deep",
     maxHops: 8,

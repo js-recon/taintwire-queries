@@ -1,0 +1,4 @@
+[
+    "selector: after \"#\", not \"<\": a selector on jQuery >= 1.9",
+    "selector: location.hash, starts with \"#\": a selector on jQuery >= 1.9"
+]

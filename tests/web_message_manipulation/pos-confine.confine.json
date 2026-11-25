@@ -1,0 +1,4 @@
+[
+    "sink: postMessage only to a fixed origin",
+    "sink: postMessage only to \"https://widget.example\""
+]
