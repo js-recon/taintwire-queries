@@ -1,17 +1,90 @@
 import type { PGRule, PGSelector } from "@js-recon/taintwire";
 import { pga } from "../lib/pga.pgq";
 
-/** an HTML sanitizer loops over node.attributes and removes the rejected ones */
-export const sink: PGSelector = {
+/** the root of a tree parsed from markup */
+const roots: PGSelector = {
     cypher: [
-        // for (...; a < node.attributes.length; ...) { ...; node.removeAttribute(attr.name) }: a <form> holding
-        // <input id=attributes> makes node.attributes that input, so the loop sees no attributes and removes none.
-        // A sanitizer that checks for clobbering (DOMPurify's instanceof HTMLFormElement / NamedNodeMap) is left out.
-        { query: `MATCH (n:MemberExpression)${pga.property}(p:Identifier), (n)${pga.object}(o:Identifier)${pga.refersTo}(d),
+        // root.innerHTML = html: the element root (its declaration, so the flow reaches every later use of it)
+        { query: `MATCH (asg:AssignmentExpression)${pga.left}(m:MemberExpression)${pga.property}(p:Identifier), (m)${pga.object}(o:Identifier)${pga.refersTo}(n), (asg)${pga.right}(v)
+WHERE p.name = 'innerHTML' AND NOT v.type IN ${pga.literals}
+${pga.ret("'innerHTML'")}` },
+        // new DOMParser().parseFromString(html, ...) and document.implementation.createHTMLDocument(...)
+        { query: `MATCH ${pga.methodCall("n")}, (n)${pga.arguments("a")}(v)
+WHERE p.name = 'parseFromString' AND a.idx = 0 AND NOT v.type IN ${pga.literals}
+${pga.ret("p.name")}` },
+        { query: `MATCH ${pga.methodCall("n")} WHERE p.name = 'createHTMLDocument' ${pga.ret("p.name")}` },
+        // template.content
+        { query: `MATCH (n:MemberExpression)${pga.property}(p:Identifier)
+WHERE p.name = 'content' AND EXISTS { MATCH (n)${pga.object}(o:Identifier)${pga.refersTo}()<-[:SON {key: 'id'}]-()-[:SON {key: 'init'}]->${pga.methodCall("tc", "tcm", "tp")}, (tc)${pga.arguments("ta")}(tt) WHERE tp.name = 'createElement' AND ta.idx = 0 AND lower(tt.value) = 'template' }
+${pga.ret("'template.content'")}` },
+    ],
+};
+
+/** a parsed tree: its root, or the parameter of a same-file method a root is passed to as this.m(root)/obj.m(root),
+ * which the value flow doesn't resolve (HTMLJanitor: clean() calls this._sanitize(sandbox, root)) */
+export const parsedTree: PGSelector = {
+    uses: { roots },
+    cypher: [
+        ...roots.cypher as { query: string }[],
+        // shortcut: matched by method name and argument position within the file; upgrade when taintwire resolves
+        // this.method() calls to their prototype/class/object definitions.
+        { query: `MATCH (b) WHERE b.id IN $roots OR EXISTS { MATCH (b)<-[:SON {key: 'id'}]-(zd)-[:SON {key: 'init'}]->(zi) WHERE zi.id IN $roots }
+MATCH (b)${pga.referencedBy}(r:Identifier)<-[ca:SON {key: 'arguments'}]-${pga.methodCall("c", "cm", "mp")}
+MATCH (fd)-[fa:SON {key: 'params'}]->(n:Identifier)
+WHERE fd.file = c.file AND fa.idx = ca.idx AND (
+     EXISTS { MATCH (fx)-[:SON {key: 'left'}]->(:MemberExpression)-[:SON {key: 'property'}]->(fp), (fx)-[:SON {key: 'right'}]->(fd) WHERE fx.type = 'AssignmentExpression' AND fp.name = mp.name }
+  OR EXISTS { MATCH (fd)-[:SON {key: 'key'}]->(fk) WHERE fd.type IN ['ObjectMethod', 'ClassMethod'] AND fk.name = mp.name }
+  OR EXISTS { MATCH (fx)-[:SON {key: 'key'}]->(fk), (fx)-[:SON {key: 'value'}]->(fd) WHERE fx.type = 'ObjectProperty' AND fk.name = mp.name })
+${pga.ret("'parsed tree passed to .' + mp.name")}` },
+    ],
+};
+
+// The attribute loop over node.attributes; n is the read, o its node identifier, d the node's declaration.
+const loop = `MATCH (n:MemberExpression)${pga.property}(p:Identifier), (n)${pga.object}(o:Identifier)${pga.refersTo}(d),
   ${pga.methodCall("c", "cm", "q")}, (cm)${pga.object}(o2:Identifier)${pga.refersTo}(d)
 WHERE p.name = 'attributes' AND q.name = 'removeAttribute' AND n.props CONTAINS '"computed":false'
   AND NOT EXISTS { MATCH (z) WHERE z.file = n.file AND z.name IN ['HTMLFormElement', 'NamedNodeMap'] }
-${pga.ret("'removeAttribute loop over ' + o.name + '.attributes'")}` },
+  AND NOT EXISTS { MATCH (n)${pga.of.object}(zm:MemberExpression)${pga.property}(zp:Identifier)
+    WHERE zm.props CONTAINS '"computed":false' AND NOT zp.name IN ['length', 'item', 'getNamedItem'] }
+  AND NOT ((EXISTS { MATCH (d)${pga.referencedBy}(:Identifier)<-[:SON {key: 'arguments'}]-(:CallExpression)-[:SON {key: 'callee'}]->(zcm:MemberExpression)-[:SON {key: 'property'}]->(zq:Identifier),
+          (zcm)${pga.object}(zpm:MemberExpression)${pga.property}(zpp:Identifier), (zpm)${pga.object}(:Identifier)${pga.refersTo}(d)
+        WHERE zq.name = 'removeChild' AND zpp.name = 'parentNode' }
+      OR EXISTS { MATCH (d)${pga.referencedBy}(:Identifier)${pga.of.object}(zrm:MemberExpression)${pga.property}(zr:Identifier), (zrm)<-[:SON {key: 'callee'}]-(:CallExpression)
+        WHERE zr.name = 'remove' })
+    AND NOT EXISTS { MATCH (zf) WHERE zf.file = n.file AND ((zf.type = 'StringLiteral' AND lower(zf.value) = 'form') OR (zf.type = 'Identifier' AND zf.name = 'form' AND EXISTS { MATCH (zk)-[:SON {key: 'key'}]->(zf) WHERE zk.type = 'ObjectProperty' })) })`;
+const kind = "'removeAttribute loop over ' + o.name + '.attributes'";
+// What the parsed tree must flow into: the node itself, or what it is iterated from, as the flow has no edge from an
+// iterable to the loop variable: for (const el of doc.querySelectorAll('*')), E.forEach(el => ...),
+// Array.prototype.forEach.call(E, el => ...). The finding stays at the attributes read n.
+const anchors = [
+    `RETURN n.id AS id, ${kind} AS kind, ${pga.loc()}`,
+    `MATCH (d)<-[:SON {key: 'id'}]-(zv)<-[:SON {key: 'declarations'}]-(zl)<-[:SON {key: 'left'}]-(zfo)-[:SON {key: 'right'}]->(e)
+WHERE zfo.type = 'ForOfStatement'
+RETURN e.id AS id, ${kind} AS kind, ${pga.loc()}`,
+    `MATCH (zfn)-[:SON {key: 'params', idx: 0}]->(d), (zc)-[:SON {key: 'arguments'}]->(zfn), (zc)-[:SON {key: 'callee'}]->(zm)-[:SON {key: 'property'}]->(zp), (zm)-[:SON {key: 'object'}]->(e)
+WHERE zc.type = 'CallExpression' AND zp.name = 'forEach'
+RETURN e.id AS id, ${kind} AS kind, ${pga.loc()}`,
+    `MATCH (zfn)-[:SON {key: 'params', idx: 0}]->(d), (zc)-[za:SON {key: 'arguments'}]->(zfn), (zc)-[zb:SON {key: 'arguments'}]->(e), (zc)-[:SON {key: 'callee'}]->(zm)-[:SON {key: 'property'}]->(zp), (zm)-[:SON {key: 'object'}]->(:MemberExpression)-[:SON {key: 'property'}]->(zq)
+WHERE zc.type = 'CallExpression' AND zp.name = 'call' AND zq.name = 'forEach' AND za.idx = 1 AND zb.idx = 0
+RETURN e.id AS id, ${kind} AS kind, ${pga.loc()}`,
+];
+
+/** an HTML sanitizer loops over node.attributes of a parsed tree and removes the rejected ones */
+export const sink: PGSelector = {
+    from: parsedTree,
+    mode: "deep",
+    maxHops: 12, // HTMLJanitor: the walker node is 10 hops from the parsed root
+    cypher: [
+        // for (...; a < node.attributes.length; ...) { ...; node.removeAttribute(attr.name) }: a <form> holding
+        // <input id=attributes> makes node.attributes that input, so the loop sees no attributes and removes none.
+        // Left out:
+        // - a sanitizer that checks for clobbering (DOMPurify's instanceof HTMLFormElement / NamedNodeMap);
+        // - x.attributes.<name> other than length/item/getNamedItem: not a NamedNodeMap (r.attributes.tokens);
+        // - one that removes the node itself (x.remove(), x.parentNode.removeChild(x)) when its tag is not allowed and
+        //   nothing in the file allows 'form' (Bootstrap's sanitizeHtml): a clobbering <form> never gets this far.
+        //   shortcut: the allowlist is checked file-wide; upgrade if a sanitizer keeps it in another file.
+        ...anchors.map((anchor) => ({ query: `${loop}
+${anchor}` })),
     ],
 };
 
@@ -19,8 +92,8 @@ export default {
     id: "dom_clobbering_sanitizer",
     name: `DOM clobbering: HTML sanitizer reads clobberable node.attributes`,
     severity: "high",
-    message: `sanitizer filters attributes through node.attributes, which a named form control can clobber`,
-    description: `An HTML filter (HTMLJanitor and similar hand-rolled sanitizers) walks the parsed nodes and removes disallowed attributes by looping over node.attributes and calling node.removeAttribute. Named form controls shadow DOM properties of their form: in <form onfocus=...><input id=attributes>, form.attributes is the input, its length is undefined, the loop never runs and every attribute survives, including event handlers. Read attributes through Element.prototype getters or reject clobbered nodes (instanceof HTMLFormElement / attributes instanceof NamedNodeMap), as DOMPurify does.`,
+    message: `sanitizer filters attributes of parsed markup through node.attributes, which a named form control can clobber`,
+    description: `An HTML filter (HTMLJanitor and similar hand-rolled sanitizers) parses markup (innerHTML, DOMParser, createHTMLDocument, <template>), walks the parsed nodes and removes disallowed attributes by looping over node.attributes and calling node.removeAttribute. Named form controls shadow DOM properties of their form: in <form onfocus=...><input id=attributes>, form.attributes is the input, its length is undefined, the loop never runs and every attribute survives, including event handlers. Nodes that do not come from parsed markup (hydration, a library's own elements) are not reported. Read attributes through Element.prototype getters or reject clobbered nodes (instanceof HTMLFormElement / attributes instanceof NamedNodeMap), as DOMPurify does.`,
     author: "shriyanss",
     tags: ["dom-clobbering", "sanitizer"],
     return: [sink],
